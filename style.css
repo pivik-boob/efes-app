@@ -1,0 +1,23 @@
+body {
+  background: #1c1c1e;
+  color: white;
+  font-family: sans-serif;
+  padding: 20px;
+  text-align: center;
+}
+
+.card {
+  background: #2c2c2e;
+  border-radius: 20px;
+  padding: 30px;
+}
+
+.btn {
+  background: #0a84ff;
+  color: white;
+  padding: 12px 24px;
+  font-size: 18px;
+  border-radius: 12px;
+  border: none;
+  margin-top: 20px;
+}
