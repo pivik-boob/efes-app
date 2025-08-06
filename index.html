@@ -1,9 +1,14 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Efes Чок</title>
+
+  <!-- Telegram Mini App -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Стили -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,8 +16,13 @@
     <h1>🍺 Efes Club Card</h1>
     <h2 id="username">Загрузка...</h2>
     <p>Бонусов: <span id="points">0</span></p>
-    <button class="btn" onclick="manualBump()">Чокнуться</button>
+    <p id="status">Готов к чок 🥂</p>
+    <p id="partner"></p>
+    <img id="bottle" src="efes-bottle.png" alt="Efes Bottle" style="width: 100px; margin: 20px auto; display: block;">
+    <button class="btn" id="shakeBtn">Чок!</button>
   </div>
-  <script src="script.js"></script>
+
+  <!-- Скрипт -->
+  <script src="script2.js"></script>
 </body>
 </html>

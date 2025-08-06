@@ -1,23 +1,64 @@
 body {
-  background: #1c1c1e;
-  color: white;
-  font-family: sans-serif;
-  padding: 20px;
-  text-align: center;
+  margin: 0;
+  padding: 0;
+  background-color: #ffffff;
+  font-family: 'Segoe UI', sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
 }
 
 .card {
-  background: #2c2c2e;
+  background-color: #fefefe;
+  border: 3px solid #004c97;
   border-radius: 20px;
-  padding: 30px;
+  padding: 25px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  text-align: center;
+}
+
+h1 {
+  color: #004c97;
+  margin-bottom: 10px;
+}
+
+h2 {
+  color: #000;
+  margin-top: 0;
+}
+
+p {
+  font-size: 18px;
+  margin: 10px 0;
 }
 
 .btn {
-  background: #0a84ff;
-  color: white;
+  background-color: #fcb900;
+  color: #000;
+  border: none;
   padding: 12px 24px;
   font-size: 18px;
   border-radius: 12px;
-  border: none;
-  margin-top: 20px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn:hover {
+  background-color: #f4a300;
+}
+
+/* bottle shaking */
+.shake {
+  animation: shake 0.5s;
+}
+
+@keyframes shake {
+  0% { transform: rotate(0); }
+  25% { transform: rotate(5deg); }
+  50% { transform: rotate(-5deg); }
+  75% { transform: rotate(5deg); }
+  100% { transform: rotate(0); }
 }
