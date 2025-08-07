@@ -35,7 +35,7 @@ function sendContact() {
       points: 1,
     };
 
-    fetch("http://localhost:3000/shake", {
+    fetch("https://efes-app.onrender.com/shake", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(userData),
