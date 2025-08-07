@@ -1,32 +1,30 @@
-let telegramUser = null;
+Telegram.WebApp.ready();
+
+let telegramUser = Telegram.WebApp.initDataUnsafe.user;
 let score = 0;
 let hasShaken = false;
 let lastShakeTime = 0;
 const shakeThreshold = 15;
-
-Telegram.WebApp.ready();
-telegramUser = Telegram.WebApp.initDataUnsafe.user;
 
 // Отображение имени
 if (telegramUser) {
   document.getElementById("username").textContent = telegramUser.first_name;
 }
 
-// Функция отправки данных на сервер
+// Функция отправки контакта
 function sendContact() {
   if (hasShaken) return;
   hasShaken = true;
 
-  // Анимация бутылки
   const bottle = document.getElementById("bottle");
   if (bottle) bottle.classList.add("shake");
 
-  // Через 1.5 сек отправка данных
   setTimeout(() => {
     const contact = prompt("Введите ваш Telegram или Instagram:");
     if (!contact) {
       alert("Контакт не введён.");
       hasShaken = false;
+      if (bottle) bottle.classList.remove("shake");
       return;
     }
 
@@ -34,20 +32,20 @@ function sendContact() {
       telegramId: telegramUser.id,
       name: telegramUser.first_name,
       contact: contact,
-      points: 1
+      points: 1,
     };
 
     fetch("http://localhost:3000/shake", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(userData)
+      body: JSON.stringify(userData),
     })
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         document.getElementById("status").textContent = data.message;
 
         if (data.youGot) {
-          document.getElementById("partner").textContent = `Ты чокнулся с ${data.youGot}`;
+          document.getElementById("partner").textContent = `чок с ${data.youGot}`;
           score += data.bonus;
           document.getElementById("score").textContent = `Баллы: ${score}`;
         }
@@ -55,16 +53,17 @@ function sendContact() {
         hasShaken = false;
         if (bottle) bottle.classList.remove("shake");
       })
-      .catch(err => {
+      .catch((err) => {
         console.error("Ошибка:", err);
         document.getElementById("status").textContent = "Ошибка соединения";
         hasShaken = false;
+        if (bottle) bottle.classList.remove("shake");
       });
-  }, 1500);
+  }, 1500); // Задержка перед отправкой
 }
 
 // Обработка встряски
-window.addEventListener("devicemotion", function(event) {
+window.addEventListener("devicemotion", function (event) {
   const acc = event.accelerationIncludingGravity;
   const now = Date.now();
 
@@ -77,7 +76,7 @@ window.addEventListener("devicemotion", function(event) {
   }
 });
 
-// Кнопка "Чокнуться"
+// Кнопка "Чок!"
 document.getElementById("shakeBtn").addEventListener("click", () => {
   sendContact();
 });
