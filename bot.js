@@ -2,8 +2,10 @@
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
-const token = process.env.BOT_TOKEN || 'ВСТАВЬ_СЮДА_СВОЙ_ТОКЕН';
-const bot = new TelegramBot(token, { polling: true });
+const token = process.env.BOT_TOKEN;
+const bot = new TelegramBot(token); // Убираем polling
+
+bot.setWebHook(`${process.env.BASE_URL}/bot${token}`);
 
 // Временное хранилище для пользователей, которые "чокнулись"
 const waitingUsers = []; // [{ id, username, contact }]
