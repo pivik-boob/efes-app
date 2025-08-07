@@ -68,5 +68,5 @@ app.post('/shake', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🟢 Бэк слушает на http://localhost:${PORT}`);
+  console.log(`🟢 Бэк слушает на http://localhost:3000`);
 });
