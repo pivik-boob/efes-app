@@ -10,9 +10,10 @@
   "version": "1.0.0",
   "description": "",
   "main": "bot.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "start": "node server.js",
+  "test": "echo \"Error: no test specified\" && exit 1"
+}
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pivik-boob/efes-app.git"
