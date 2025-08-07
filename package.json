@@ -1,28 +1,16 @@
 {
+  "name": "efes-app",
+  "version": "1.0.0",
+  "description": "Telegram Mini App for Efes bottle bump",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
-    "body-parser": "^2.2.0",
+    "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "node-telegram-bot-api": "^0.66.0"
-  },
-  "name": "efes",
-  "version": "1.0.0",
-  "description": "",
-  "main": "bot.js",
-"scripts": {
-  "start": "node server.js",
-  "test": "echo \"Error: no test specified\" && exit 1"
-}
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/pivik-boob/efes-app.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/pivik-boob/efes-app/issues"
-  },
-  "homepage": "https://github.com/pivik-boob/efes-app#readme"
+  }
 }
