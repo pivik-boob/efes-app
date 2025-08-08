@@ -89,8 +89,8 @@ if (!telegramUser || !telegramUser.id) {
 
 // Имя на карточке
 if ($('username')) {
-  $('username').textContent =
-    telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
+  const name = telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
+  $('username').textContent = `${name}  #${telegramUser.id}`; // ← вернули показ ID
 }
 
 
