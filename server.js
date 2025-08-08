@@ -1,4 +1,4 @@
-// server.js — единая точка входа (и бот, и API мини-аппа)
+// server.js — единая точка входа (бот + API мини-аппа)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 3000;
 
 // ==== ENV ====
 const BOT_TOKEN  = process.env.BOT_TOKEN;
-const BASE_URL   = process.env.BASE_URL;   // https://<your-render>.onrender.com
-const WEBAPP_URL = process.env.WEBAPP_URL; // https://<your-vercel>.vercel.app
+const BASE_URL   = process.env.BASE_URL;   // например: https://efes-app.onrender.com  (без / на конце)
+const WEBAPP_URL = process.env.WEBAPP_URL; // например: https://efes-app.vercel.app    (без / на конце)
 
 if (!BOT_TOKEN)  throw new Error('BOT_TOKEN is required');
 if (!BASE_URL)   console.warn('⚠️ BASE_URL is not set — setWebhook may fail');
@@ -21,11 +21,11 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 
 // ==== Telegram Bot (webhook, no polling) ====
-const bot = new TelegramBot(BOT_TOKEN);
+const bot = new TelegramBot(BOT_TOKEN, { webHook: true });
 
-// Ставим вебхук на конкретный URL вида /bot<TOKEN>
-bot.setWebHook(`${BASE_URL}/bot${BOT_TOKEN}`)
-  .then(() => console.log('✅ Webhook set OK'))
+// Переустанавливаем вебхук с drop_pending_updates (чтоб не накапливал старые апдейты)
+bot.setWebHook(`${BASE_URL}/bot${BOT_TOKEN}`, { drop_pending_updates: true })
+  .then(() => console.log('✅ Webhook set to', `${BASE_URL}/bot${BOT_TOKEN}`))
   .catch(err => console.error('❌ setWebHook error:', err));
 
 // Глобальная кнопка в меню бота (видна даже без /start)
@@ -50,9 +50,15 @@ app.post(`/bot${BOT_TOKEN}`, (req, res) => {
   }
 });
 
-// ==== Простейшие health-роуты ====
+// ==== Health ====
 app.get('/', (_req, res) => res.send('OK'));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// ==== Временный лог с фронта для диагностики (можно удалить после стабилизации) ====
+app.post('/debug-log', (req, res) => {
+  console.log('📲 FRONT DEBUG:', JSON.stringify(req.body));
+  res.sendStatus(200);
+});
 
 // ==== ПАМЯТЬ (in-memory) ====
 const users  = new Map(); // telegramId -> { name, contact, points }
@@ -77,7 +83,7 @@ app.post('/shake', (req, res) => {
     // Находим первого доступного собеседника, с кем ещё не "чокались" сегодня
     let matched = null;
     for (const [id, u] of users.entries()) {
-      if (id !== telegramId && !alreadyShakenToday(telegramId, id)) {
+      if (String(id) !== String(telegramId) && !alreadyShakenToday(telegramId, id)) {
         matched = { id, ...u };
         break;
       }
@@ -128,7 +134,7 @@ bot.onText(/^\/start(?:\s+.*)?$/i, async (msg) => {
   }
 });
 
-// ==== Бот: данные из WebApp ====
+// ==== Бот: данные из WebApp (если используешь sendData) ====
 bot.on('web_app_data', async (msg) => {
   const userId   = msg.from.id;
   const username = msg.from.username || msg.from.first_name || `user_${userId}`;

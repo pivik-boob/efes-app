@@ -25,50 +25,75 @@
 
     tg.ready();
     tg.expand();
+// ---------- ЖЕЛЕЗОБЕТОННЫЙ способ получить user ----------
+function parseUserJson(maybeJson) {
+  try { return JSON.parse(maybeJson); } catch { /* not JSON */ }
+  // бывает двойное кодирование
+  try { return JSON.parse(decodeURIComponent(maybeJson)); } catch { /* no-op */ }
+  return null;
+}
 
-    // ---------- ЖЕЛЕЗОБЕТОННЫЙ способ получить user ----------
-    function getTGUser() {
-      // 1) обычный путь
-      if (tg.initDataUnsafe?.user) return tg.initDataUnsafe.user;
+function getTGUser() {
+  // 1) нормальный путь
+  if (tg.initDataUnsafe?.user) return tg.initDataUnsafe.user;
 
-      // 2) fallback: tg.initData (строка like "k=v&k2=v2")
-      if (tg.initData) {
-        try {
-          const p = new URLSearchParams(tg.initData);
-          const u = p.get('user');
-          if (u) return JSON.parse(u);
-        } catch (e) {}
+  // 2) fallback: tg.initData (строка "k=v&k2=v2")
+  if (tg.initData) {
+    try {
+      const p = new URLSearchParams(tg.initData);
+      const u = p.get('user');
+      const parsed = u && parseUserJson(u);
+      if (parsed?.id) return parsed;
+    } catch {}
+  }
+
+  // 3) запасной: tgWebAppData в hash (#tgWebAppData=...)
+  if (location.hash) {
+    try {
+      const hash = new URLSearchParams(location.hash.slice(1));
+      const tgData = hash.get('tgWebAppData');
+      if (tgData) {
+        const params = new URLSearchParams(tgData);
+        const u = params.get('user');
+        const parsed = u && parseUserJson(u);
+        if (parsed?.id) return parsed;
       }
+    } catch {}
+  }
 
-      // 3) запасной: tgWebAppData в hash
-      if (location.hash) {
-        try {
-          const hash = new URLSearchParams(location.hash.slice(1));
-          const tgData = hash.get('tgWebAppData');
-          if (tgData) {
-            const params = new URLSearchParams(tgData);
-            const u = params.get('user');
-            if (u) return JSON.parse(u);
-          }
-        } catch (e) {}
+  // 4) ещё один запасной: tgWebAppData может быть в query (?tgWebAppData=...)
+  if (location.search) {
+    try {
+      const qs = new URLSearchParams(location.search);
+      const tgData = qs.get('tgWebAppData');
+      if (tgData) {
+        const params = new URLSearchParams(tgData);
+        const u = params.get('user');
+        const parsed = u && parseUserJson(u);
+        if (parsed?.id) return parsed;
       }
-      return null;
-    }
-    // ----------------------------------------------------------
+    } catch {}
+  }
 
-    telegramUser = getTGUser();
+  return null;
+}
+// ----------------------------------------------------------
 
-    if (!telegramUser || !telegramUser.id) {
-      $('status') && ($('status').textContent = 'Нет данных пользователя. Откройте мини-апп из бота.');
-      console.warn('initData пуст. tg.initData=', tg.initData, 'hash=', location.hash);
-      return;
-    }
+telegramUser = getTGUser();
 
-    // Имя на карточке
-    if ($('username')) {
-      $('username').textContent =
-        telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
-    }
+if (!telegramUser || !telegramUser.id) {
+  $('status') && ($('status').textContent = 'Нет данных пользователя. Откройте мини-апп из бота.');
+  console.warn('initData пуст. initDataLen=', (tg.initData||'').length, 'hash=', location.hash, 'search=', location.search);
+  return;
+}
+
+// Имя на карточке
+if ($('username')) {
+  $('username').textContent =
+    telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
+}
+
+
 
     // ===== iOS: разрешение на датчики ТОЛЬКО по клику =====
     async function ensureMotionPermission() {
