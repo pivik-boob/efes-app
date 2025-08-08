@@ -1,12 +1,16 @@
+// script2.js — фикс получения user на мобилках + чок только по встряске
+// В index.html ДО этого файла должен быть SDK:
+// <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
 (function () {
-  const API_BASE = 'https://efes-app.onrender.com'; // твой backend на Render (только HTTPS!)
+  const API_BASE = 'https://efes-app.onrender.com'; // твой backend (HTTPS!)
 
   let telegramUser = null;
   let score = 0;
   let hasShaken = false;
   let lastShakeTime = 0;
-  const shakeThreshold = 15;     // можешь подстроить (12–18)
-  const minShakeInterval = 1500; // антидребезг
+  const shakeThreshold = 15;
+  const minShakeInterval = 1500;
 
   const $ = (id) => document.getElementById(id);
 
@@ -14,42 +18,71 @@
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 
     if (!tg) {
-      $('status') && ( $('status').textContent = 'Откройте мини-апп внутри Telegram (через бота).' );
+      $('status') && ($('status').textContent = 'Откройте мини-апп внутри Telegram (через бота).');
       console.warn('Telegram.WebApp не найден');
       return;
     }
 
-    // Правильная инициализация на мобильных
     tg.ready();
     tg.expand();
 
-    // Получаем пользователя только после ready()
-    telegramUser = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+    // ---------- ЖЕЛЕЗОБЕТОННЫЙ способ получить user ----------
+    function getTGUser() {
+      // 1) обычный путь
+      if (tg.initDataUnsafe?.user) return tg.initDataUnsafe.user;
+
+      // 2) fallback: tg.initData (строка like "k=v&k2=v2")
+      if (tg.initData) {
+        try {
+          const p = new URLSearchParams(tg.initData);
+          const u = p.get('user');
+          if (u) return JSON.parse(u);
+        } catch (e) {}
+      }
+
+      // 3) запасной: tgWebAppData в hash
+      if (location.hash) {
+        try {
+          const hash = new URLSearchParams(location.hash.slice(1));
+          const tgData = hash.get('tgWebAppData');
+          if (tgData) {
+            const params = new URLSearchParams(tgData);
+            const u = params.get('user');
+            if (u) return JSON.parse(u);
+          }
+        } catch (e) {}
+      }
+      return null;
+    }
+    // ----------------------------------------------------------
+
+    telegramUser = getTGUser();
+
     if (!telegramUser || !telegramUser.id) {
-      $('status') && ( $('status').textContent = 'Нет данных пользователя. Откройте мини-апп из бота.' );
-      console.warn('initDataUnsafe.user пуст — вероятно, запуск не из бота');
+      $('status') && ($('status').textContent = 'Нет данных пользователя. Откройте мини-апп из бота.');
+      console.warn('initData пуст. tg.initData=', tg.initData, 'hash=', location.hash);
       return;
     }
 
-    // Отображение имени
+    // Имя на карточке
     if ($('username')) {
       $('username').textContent =
         telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
     }
 
-    // ===== iOS: запрашиваем доступ к датчикам ТОЛЬКО по клику =====
+    // ===== iOS: разрешение на датчики ТОЛЬКО по клику =====
     async function ensureMotionPermission() {
       if (typeof DeviceMotionEvent !== 'undefined' &&
           typeof DeviceMotionEvent.requestPermission === 'function') {
         const res = await DeviceMotionEvent.requestPermission();
         if (res !== 'granted') {
-          $('status') && ( $('status').textContent = 'Разрешите доступ к датчикам движения.' );
+          $('status') && ($('status').textContent = 'Разрешите доступ к датчикам движения.');
           throw new Error('Motion permission denied');
         }
       }
     }
 
-    // ===== Отправка контакта (ВЫЗЫВАЕТСЯ ТОЛЬКО ИЗ ВСТРЯСКИ) =====
+    // ===== Отправка контакта (ТОЛЬКО из встряски) =====
     function sendContact() {
       if (hasShaken) return;
       hasShaken = true;
@@ -69,7 +102,7 @@
         const userData = {
           telegramId: telegramUser.id,
           name: telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`,
-          contact: contact,
+          contact,
           points: 1
         };
 
@@ -83,50 +116,49 @@
             if ($('status')) $('status').textContent = data.message || 'OK';
 
             if (data.youGot) {
-              $('partner') && ( $('partner').textContent = `чок с ${data.youGot}` );
+              $('partner') && ($('partner').textContent = `чок с ${data.youGot}`);
               score += (data.bonus || 0);
-              $('score') && ( $('score').textContent = `Баллы: ${score}` );
+              $('score') && ($('score').textContent = `Баллы: ${score}`);
             }
-
-            hasShaken = false;
-            if (bottle) bottle.classList.remove('shake');
           })
           .catch((err) => {
             console.error('Ошибка:', err);
-            $('status') && ( $('status').textContent = 'Ошибка соединения' );
+            $('status') && ($('status').textContent = 'Ошибка соединения');
+          })
+          .finally(() => {
             hasShaken = false;
             if (bottle) bottle.classList.remove('shake');
           });
-      }, 1500); // задержка перед отправкой — как в твоей версии
+      }, 1500);
     }
 
-    // ===== Детектор встряски (ТОЛЬКО он запускает sendContact) =====
+    // ===== Детектор встряски (он один вызывает sendContact) =====
     window.addEventListener('devicemotion', (event) => {
       const acc = event.accelerationIncludingGravity || event.acceleration;
       const now = Date.now();
       if (!acc) return;
 
       const total = Math.sqrt(
-        (acc.x || 0) * (acc.x || 0) +
-        (acc.y || 0) * (acc.y || 0) +
-        (acc.z || 0) * (acc.z || 0)
+        (acc.x || 0) ** 2 +
+        (acc.y || 0) ** 2 +
+        (acc.z || 0) ** 2
       );
 
       if (total > shakeThreshold && now - lastShakeTime > minShakeInterval) {
         lastShakeTime = now;
-        sendContact(); // контакты меняются только после реальной встряски
+        sendContact(); // обмен только после реальной встряски
       }
     });
 
-    // ===== Кнопка "Чок!" — только запрос разрешения (не отправляет контакт) =====
+    // ===== Кнопка "Чок!" — только запрос прав (не отправляет контакт) =====
     const btn = $('shakeBtn');
     if (btn) {
       btn.addEventListener('click', async () => {
         try {
           await ensureMotionPermission();
-          $('status') && ( $('status').textContent = 'Готово! Теперь встряхните телефон вместе.' );
+          $('status') && ($('status').textContent = 'Готово! Теперь встряхните телефоны вместе.');
         } catch {
-          // подсказку уже показали в ensureMotionPermission
+          // подсказку уже показали
         }
       });
     }
