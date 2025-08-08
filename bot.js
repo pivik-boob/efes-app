@@ -3,18 +3,15 @@ const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
 const token = process.env.BOT_TOKEN;
-const bot = new TelegramBot(token); // Убираем polling
+// const bot = new TelegramBot(token); // Убираем polling
 
-bot.setWebHook(`${process.env.BASE_URL}/bot${token}`);
+//bot.setWebHook(`${process.env.BASE_URL}/bot${token}`);
 
 // Временное хранилище для пользователей, которые "чокнулись"
 const waitingUsers = []; // [{ id, username, contact }]
 
 // Хранилище бонусов (в памяти)
 const users = {}; // user_id: { bonuses: 0, contacts: [] }
-
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
 
   bot.sendMessage(chatId, '🍺 Добро пожаловать в Efes Club! Открой свою карту:', {
     reply_markup: {
@@ -28,7 +25,6 @@ bot.onText(/\/start/, (msg) => {
       ]]
     }
   });
-});
 
 // Обработка данных из Web App (встряска и отправка контакта)
 bot.on('web_app_data', (msg) => {

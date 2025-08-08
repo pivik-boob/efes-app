@@ -1,124 +1,158 @@
+// server.js — единая точка входа (и бот, и API мини-аппа)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const bot = new TelegramBot(process.env.BOT_TOKEN);
-bot.setWebHook(`${process.env.BASE_URL}/bot${process.env.BOT_TOKEN}`);
 
-app.use(cors());
-app.use(bodyParser.json());
+// ==== ENV ====
+const BOT_TOKEN  = process.env.BOT_TOKEN;
+const BASE_URL   = process.env.BASE_URL;   // https://<your-render>.onrender.com
+const WEBAPP_URL = process.env.WEBAPP_URL; // https://<your-vercel>.vercel.app
 
-// Telegram webhook endpoint
-app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
+if (!BOT_TOKEN)  throw new Error('BOT_TOKEN is required');
+if (!BASE_URL)   console.warn('⚠️ BASE_URL is not set — setWebhook may fail');
+if (!WEBAPP_URL) console.warn('⚠️ WEBAPP_URL is not set — open-app button will be hidden');
 
-// == Хранилище ==
-const users = new Map(); // telegramId -> { name, contact, points }
-const shakes = new Map(); // "id1-id2" -> date
+// ==== Middlewares ====
+app.use(cors({ origin: true }));
+app.use(express.json());
 
-function generatePairKey(id1, id2) {
-  return [Math.min(id1, id2), Math.max(id1, id2)].join("-");
+// ==== Telegram Bot (webhook, no polling) ====
+const bot = new TelegramBot(BOT_TOKEN);
+
+// Ставим вебхук на конкретный URL вида /bot<TOKEN>
+bot.setWebHook(`${BASE_URL}/bot${BOT_TOKEN}`)
+  .then(() => console.log('✅ Webhook set OK'))
+  .catch(err => console.error('❌ setWebHook error:', err));
+
+// Глобальная кнопка в меню бота (видна даже без /start)
+if (WEBAPP_URL) {
+  bot.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: 'Открыть мини-апп 🍺',
+      web_app: { url: WEBAPP_URL }
+    }
+  }).catch(err => console.error('setChatMenuButton error:', err));
 }
 
-function alreadyShakenToday(id1, id2) {
-  const key = generatePairKey(id1, id2);
-  const lastDate = shakes.get(key);
-  const today = new Date().toISOString().slice(0, 10);
-  return lastDate === today;
-}
-
-// == /shake endpoint для фронта ==
-app.post('/shake', (req, res) => {
-  const { telegramId, name, contact } = req.body;
-
-  if (!telegramId || !name || !contact) {
-    return res.status(400).json({ message: 'Некорректные данные' });
-  }
-
-  if (!users.has(telegramId)) {
-    users.set(telegramId, { name, contact, points: 0 });
-  }
-
-  let matchedUser = null;
-  for (let [id, user] of users.entries()) {
-    if (id !== telegramId && !alreadyShakenToday(telegramId, id)) {
-      matchedUser = { id, ...user };
-      break;
-    }
-  }
-
-  if (matchedUser) {
-    const key = generatePairKey(telegramId, matchedUser.id);
-    shakes.set(key, new Date().toISOString().slice(0, 10));
-
-    users.get(telegramId).points += 1;
-    users.get(matchedUser.id).points += 1;
-
-    return res.json({
-      message: "🎉 Чок засчитан!",
-      bonus: 1,
-      youGot: matchedUser.name
-    });
-  } else {
-    return res.json({
-      message: "Ожидание второго участника или уже чокнулись сегодня",
-      bonus: 0
-    });
-  }
-});
-
-// == Бот: /start ==
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-
-  bot.sendMessage(chatId, '🍺 Добро пожаловать в Efes Club! Открой свою карту:', {
-    reply_markup: {
-      inline_keyboard: [[
-        {
-          text: '🎉 Открыть карточку',
-          web_app: {
-            url: 'https://efes-app.vercel.app/' // твой фронт
-          }
-        }
-      ]]
-    }
-  });
-});
-
-// == Бот: обработка данных из Web App ==
-bot.on('web_app_data', (msg) => {
-  const userId = msg.from.id;
-  const username = msg.from.username || `user_${userId}`;
-  let data = {};
-
+// Эндпоинт вебхука: обязательно bot.processUpdate(...)
+app.post(`/bot${BOT_TOKEN}`, (req, res) => {
   try {
-    data = JSON.parse(msg.web_app_data.data);
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
   } catch (e) {
-    return bot.sendMessage(userId, '❌ Ошибка при обработке данных.');
+    console.error('processUpdate error:', e);
+    res.sendStatus(500);
   }
-
-  if (!data.contact) return;
-
-  const user = {
-    id: userId,
-    username,
-    contact: data.contact
-  };
-
-  // Добавим в users, чтобы их могли найти в API /shake тоже
-  if (!users.has(userId)) {
-    users.set(userId, { name: username, contact: user.contact, points: 0 });
-  }
-
-  bot.sendMessage(userId, '✅ Контакт получен! Теперь встряхни, чтобы чокнуться 🍻');
 });
 
+// ==== Простейшие health-роуты ====
+app.get('/', (_req, res) => res.send('OK'));
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// ==== ПАМЯТЬ (in-memory) ====
+const users  = new Map(); // telegramId -> { name, contact, points }
+const shakes = new Map(); // "id1-id2" -> "YYYY-MM-DD"
+
+const pairKey = (a, b) => [Math.min(+a, +b), Math.max(+a, +b)].join('-');
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const alreadyShakenToday = (id1, id2) => shakes.get(pairKey(id1, id2)) === todayStr();
+
+// ==== /shake — API для мини-аппа ====
+app.post('/shake', (req, res) => {
+  try {
+    const { telegramId, name, contact } = req.body || {};
+    if (!telegramId || !name || !contact) {
+      return res.status(400).json({ message: 'Некорректные данные' });
+    }
+
+    if (!users.has(telegramId)) {
+      users.set(telegramId, { name, contact, points: 0 });
+    }
+
+    // Находим первого доступного собеседника, с кем ещё не "чокались" сегодня
+    let matched = null;
+    for (const [id, u] of users.entries()) {
+      if (id !== telegramId && !alreadyShakenToday(telegramId, id)) {
+        matched = { id, ...u };
+        break;
+      }
+    }
+
+    if (!matched) {
+      return res.json({
+        message: 'Ожидание второго участника или уже чокнулись сегодня',
+        bonus: 0
+      });
+    }
+
+    // Фиксируем дату "чока"
+    shakes.set(pairKey(telegramId, matched.id), todayStr());
+
+    // Начисляем баллы
+    users.get(telegramId).points += 1;
+    users.get(matched.id).points += 1;
+
+    return res.json({
+      message: '🎉 Чок засчитан!',
+      bonus: 1,
+      youGot: matched.name
+    });
+  } catch (e) {
+    console.error('/shake error:', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ==== Бот: /start (надёжный регекс + web_app-кнопка) ====
+bot.onText(/^\/start(?:\s+.*)?$/i, async (msg) => {
+  const chatId = msg.chat.id;
+  try {
+    if (WEBAPP_URL) {
+      await bot.sendMessage(chatId, 'Открой мини-апп:', {
+        reply_markup: {
+          keyboard: [[{ text: 'Открыть мини-апп 🍺', web_app: { url: WEBAPP_URL } }]],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      });
+    } else {
+      await bot.sendMessage(chatId, 'Мини-апп готов. Добавь WEBAPP_URL в переменные окружения, чтобы появилась кнопка.');
+    }
+  } catch (e) {
+    console.error('sendMessage /start error:', e);
+  }
+});
+
+// ==== Бот: данные из WebApp ====
+bot.on('web_app_data', async (msg) => {
+  const userId   = msg.from.id;
+  const username = msg.from.username || msg.from.first_name || `user_${userId}`;
+  try {
+    const payload = JSON.parse(msg.web_app_data?.data || '{}');
+
+    if (!payload.contact) {
+      return bot.sendMessage(userId, '❌ Не найден контакт для сохранения.');
+    }
+
+    const entry = users.get(userId) || { name: username, contact: null, points: 0 };
+    entry.name    = entry.name || username;
+    entry.contact = payload.contact;
+    users.set(userId, entry);
+
+    await bot.sendMessage(userId, '✅ Контакт получен! Теперь встряхни, чтобы чокнуться 🍻');
+  } catch (e) {
+    console.error('web_app_data parse error:', e);
+    await bot.sendMessage(userId, '❌ Ошибка при обработке данных мини-аппа.');
+  }
+});
+
+// ==== Start server ====
 app.listen(PORT, () => {
-  console.log(`🟢 Бэк слушает на http://localhost:${PORT}`);
+  console.log(`🟢 Server listening on http://localhost:${PORT}`);
+  console.log(`   Webhook: ${BASE_URL ? `${BASE_URL}/bot${BOT_TOKEN}` : 'BASE_URL not set'}`);
 });
