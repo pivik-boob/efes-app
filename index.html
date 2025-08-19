@@ -21,6 +21,14 @@
     <img id="bottle" src="efes-bottle.png" alt="Efes Bottle" style="width: 100px; margin: 20px auto; display: block;">
     <button class="btn" id="shakeBtn">Чок!</button>
   </div>
- <script src="/script2.js?v=13" defer></script>
+
+  <!-- 🔽 вот сюда вставляем перед подключением script2.js -->
+  <script>
+    // Укажи здесь адрес, где запущен твой backend (server.js)
+    // Например, если на Render:
+    window.__API_BASE__ = 'https://efes-backend.onrender.com';
+  </script>
+
+  <script src="/script2.js?v=13" defer></script>
 </body>
 </html>

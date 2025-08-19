@@ -3,7 +3,7 @@
 // <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
 (function () {
-  const API_BASE = 'https://efes-app.onrender.com'; // твой backend (HTTPS!)
+  const API_BASE = (window.__API_BASE__ || '').trim() || `${location.origin}`; // твой backend (HTTPS!)
 
   let telegramUser = null;
   let score = 0;
@@ -25,6 +25,22 @@
 
     tg.ready();
     tg.expand();
+    (function diag() {
+  const tg = window.Telegram?.WebApp;
+  const el = document.getElementById('status');
+
+  if (!tg) { el && (el.textContent = 'WebApp SDK не найден'); return; }
+
+  const initLen = (tg.initData || '').length;
+  const hasUser = !!tg.initDataUnsafe?.user;
+  const uid = tg.initDataUnsafe?.user?.id || null;
+
+  el && (el.textContent =
+    `TMA ok · initData=${initLen} · user=${hasUser ? uid : 'none'}`);
+
+  // Доп.лог в консоль (видно в DevTools Vercel/браузера)
+  console.log('[TMA]', { initLen, user: tg.initDataUnsafe?.user, initData: tg.initData });
+})();
 // ---------- ЖЕЛЕЗОБЕТОННЫЙ способ получить user ----------
 function parseUserJson(maybeJson) {
   try { return JSON.parse(maybeJson); } catch { /* not JSON */ }
