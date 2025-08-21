@@ -1,238 +1,217 @@
+// script2.js — кнопка/тряска, звук/анимации, отправка userId/insta/initData на сервер
 (function () {
-  // ====== настроики ======
-  const API_BASE = (window.__API_BASE__ || location.origin).replace(/\/+$/,'');
-  const SHAKE_THRESHOLD = 15;       // чувствительность встряски
-  const MIN_SHAKE_INTERVAL = 1500;  // мс между "чоками"
+  const API_BASE = window.__API_BASE__ || '';
+  const BOT_USERNAME = window.__BOT_USERNAME__ || '';
 
-  // ====== состояние ======
-  let tg = null;
-  let telegramUser = null;
-  let lastShakeTime = 0;
-  let lastAccel = { x: null, y: null, z: null };
-  let contactStr = '';
-
-  // ====== утилиты ======
-  const $ = (id) => document.getElementById(id);
-  const setStatus = (txt) => { const el = $('status'); if (el) el.textContent = txt; };
-  const text = (node, s) => node && node.replaceChildren(document.createTextNode(s));
-
-  // ====== темы (фон + картинка + звук) ======
-  const THEMES = {
-    classic: { title: 'Классика', bottle: 'efes-bottle.png', sfx: 'bottle', body: 'classic' },
-    can:     { title: 'Банка',    bottle: 'efes-can.png',    sfx: 'can',     body: 'can' },
-    gold:    { title: 'Gold',     bottle: 'efes-bottle.png', sfx: 'bottle',  body: 'gold' },
-    dark:    { title: 'Dark',     bottle: 'efes-bottle.png', sfx: 'bottle',  body: 'dark' },
+  // --- DOM ---
+  const els = {
+    username: document.getElementById('username'),
+    score: document.getElementById('score'),
+    status: document.getElementById('status'),
+    partner: document.getElementById('partner'),
+    bottle: document.getElementById('bottle'),
+    cap: document.getElementById('cap'),
+    foam: document.getElementById('foam'),
+    shakeBtn: document.getElementById('shakeBtn'),
+    openFromBotBtn: document.getElementById('openFromBotBtn'),
+    themeSel: document.getElementById('themeSel'),
+    sfxBottle: document.getElementById('sfx-bottle'),
+    sfxCan: document.getElementById('sfx-can'),
+    instaInput: document.getElementById('instaInput'),
+    saveInstaBtn: document.getElementById('saveInstaBtn'),
   };
-  let currentTheme = localStorage.getItem('efes_theme') || 'classic';
 
-  function applyTheme(key){
-    if (!THEMES[key]) key = 'classic';
-    currentTheme = key;
-    localStorage.setItem('efes_theme', key);
+  // --- Telegram WebApp detection ---
+  const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  const inTelegram = Boolean(tg && tg.initDataUnsafe);
 
-    // фон/цвета через data-theme
-    document.body.setAttribute('data-theme', THEMES[key].body || 'classic');
-
-    // картинка бутылки/банки
-    const img = $('bottle');
-    if (img && THEMES[key].bottle) img.src = THEMES[key].bottle;
+  // --- Instagram helpers ---
+  function getInsta() {
+    return localStorage.getItem('insta') || '';
+  }
+  function saveInsta(nick) {
+    if (!nick) return;
+    const clean = String(nick).trim().replace(/^@/, '');
+    if (clean.length === 0) return;
+    localStorage.setItem('insta', clean);
+    els.status.textContent = 'Instagram сохранён';
+    setTimeout(() => (els.status.textContent = 'Готов к чок 🥂'), 1200);
+    if (els.instaInput) els.instaInput.value = '@' + clean;
   }
 
-  function mountThemeSelector(){
-    const sel = $('themeSel');
-    if (!sel) return; // если селектора нет в HTML — всё равно ок
-    sel.innerHTML = Object.entries(THEMES)
-      .map(([k,v]) => `<option value="${k}">${v.title}</option>`).join('');
-    sel.value = currentTheme;
-    sel.addEventListener('change', ()=> applyTheme(sel.value));
-  }
-
-  // ====== Telegram SDK ======
-  async function ensureTgReady() {
-    if (!window.Telegram || !window.Telegram.WebApp) {
-      setStatus('Откройте мини-апп из бота по кнопке.');
-      throw new Error('No Telegram.WebApp');
-    }
-    tg = window.Telegram.WebApp;
-    try { tg.ready(); tg.expand?.(); } catch {}
-    return tg;
-  }
-
-  // получаем user: сначала из initDataUnsafe.user, иначе парсим строку initData
-  function extractUser() {
-    const u = tg?.initDataUnsafe?.user;
-    if (u && u.id) return u;
-    const str = tg?.initData;
-    if (typeof str === 'string' && str.length) {
+  // Показ имени / fallback‑кнопки / автозаполнение инсты
+  (function initHeader() {
+    if (inTelegram) {
       try {
-        const p = new URLSearchParams(str);
-        const j = p.get('user');
-        if (j) {
-          const parsed = JSON.parse(j);
-          if (parsed?.id) return parsed;
-        }
-      } catch {}
+        tg.ready();
+        const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+        els.username.textContent = user?.first_name
+          ? `Привет, ${user.first_name}!`
+          : 'Готов к чок 🥂';
+      } catch (_) {
+        els.username.textContent = 'Готов к чок 🥂';
+      }
+    } else {
+      els.username.textContent = 'Открой из Telegram 👇';
+      if (els.openFromBotBtn && BOT_USERNAME) {
+        els.openFromBotBtn.style.display = 'inline-block';
+        els.openFromBotBtn.onclick = () => {
+          const url = `https://t.me/${BOT_USERNAME}?startapp=home`;
+          window.open(url, '_blank');
+        };
+      }
     }
-    return null;
-  }
-
-  async function waitForUser(ms = 2000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < ms) {
-      const u = extractUser();
-      if (u?.id) return u;
-      await new Promise(r => setTimeout(r, 100));
+    // заполним поле инсты
+    if (els.instaInput) {
+      const cur = getInsta();
+      els.instaInput.value = cur ? '@' + cur : '';
     }
-    return null;
-  }
-
-  // ====== UI ======
-  function showUser(u) {
-    const name = u.username ? `@${u.username}` : (u.first_name || `user_${u.id}`);
-    text($('username'), `${name}  #${u.id}`);
-    setStatus('Готово! Нажмите «Чок!» и разрешите доступ к датчику движения.');
-  }
-
-  function showOpenFromBot() {
-    text($('username'), 'Загрузка...');
-    setStatus('Откройте мини-апп из бота по кнопке.');
-    // Показать кнопку «Открыть из бота», если задан username бота
-    const bot = (window.__BOT_USERNAME__ || '').trim();
-    const btn = $('openFromBotBtn');
-    if (btn && bot && tg?.openTelegramLink) {
-      btn.style.display = 'inline-block';
-      btn.onclick = () => tg.openTelegramLink(`https://t.me/${bot}?startapp=1`);
+    if (els.saveInstaBtn) {
+      els.saveInstaBtn.addEventListener('click', () => {
+        const val = els.instaInput?.value || '';
+        if (val) saveInsta(val);
+      });
     }
-  }
+  })();
 
-  // ====== разрешение на датчики (iOS) ======
-  async function ensureMotionPermission() {
-    if (typeof DeviceMotionEvent === 'undefined') return true;
-    if (typeof DeviceMotionEvent.requestPermission !== 'function') return true;
-    const st = await DeviceMotionEvent.requestPermission().catch(() => 'denied');
-    if (st !== 'granted') {
-      setStatus('Разрешите доступ к движению (нажмите «Чок!» и выберите Разрешить).');
-      throw new Error('motion permission denied');
-    }
-    return true;
+  // --- Аудио: разблокировка (iOS) ---
+  let audioUnlocked = false;
+  function unlockAudioOnce() {
+    if (audioUnlocked) return;
+    [els.sfxBottle, els.sfxCan].forEach(a => {
+      try { a.play().then(() => a.pause()).catch(() => {}); } catch(_) {}
+    });
+    audioUnlocked = true;
+    window.removeEventListener('touchstart', unlockAudioOnce, { passive: true });
+    window.removeEventListener('click', unlockAudioOnce);
   }
+  window.addEventListener('touchstart', unlockAudioOnce, { passive: true });
+  window.addEventListener('click', unlockAudioOnce);
 
-  // ====== анимация бутылки ======
+  // --- Очки/состояние на клиенте (MVP) ---
+  let score = 0;
+  let busy = false;
+  let lastShakeAt = 0;
+
+  // --- Звук + анимации ---
+  function playSfx() {
+    const useBottle = Math.random() > 0.35;
+    const node = useBottle ? els.sfxBottle : els.sfxCan;
+    try { node.currentTime = 0; node.play().catch(() => {}); } catch(_) {}
+  }
   function animateBottle() {
-    const img = $('bottle'); if (!img) return;
-    img.style.transition = 'transform 0.2s ease';
-    img.style.transform = 'rotate(15deg) scale(1.05)';
-    setTimeout(() => { img.style.transform = 'rotate(-10deg)'; }, 200);
-    setTimeout(() => { img.style.transform = 'rotate(0deg) scale(1)'; }, 400);
+    // классы из style.css: .cap.pop, .foam.spray, .bottle-img.bump
+    els.cap.classList.remove('pop');    void els.cap.offsetWidth;    els.cap.classList.add('pop');
+    els.foam.classList.remove('spray'); void els.foam.offsetWidth;   els.foam.classList.add('spray');
+    els.bottle.classList.remove('bump');void els.bottle.offsetWidth; els.bottle.classList.add('bump');
   }
 
-  // ====== аудио/эффект «открытия» ======
-  let audioPrimed = false;
-  function primeAudio() {
-    if (audioPrimed) return;
-    ['sfx-bottle','sfx-can'].forEach(id => {
-      const el = document.getElementById(id); if (!el) return;
-      el.volume = 0.95;
-      try { el.play().then(()=>{ el.pause(); el.currentTime = 0; audioPrimed = true; }).catch(()=>{}); } catch {}
+  // --- Отправка события на сервер ---
+  async function sendShake(source) {
+    const user = inTelegram && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+    const payload = {
+      userId: user?.id || null,
+      username: user?.username || null,
+      insta: getInsta(),
+      clientTs: Date.now(),
+      source,
+      device: navigator.userAgent || '',
+      initData: inTelegram ? (tg.initData || '') : '' // строка для HMAC-проверки (если включишь на бэке)
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/shake`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok) {
+        // очки (локально), статус и партнёр
+        score += Number(data.bonus || 1);
+        els.score.textContent = String(score);
+        els.status.textContent = data.message || 'Чок засчитан!';
+        if (data.partner) {
+          const nick = data.partner.username || data.partner.userId || 'гость';
+          const instaTxt = data.partner.insta ? ` (insta: @${data.partner.insta})` : '';
+          els.partner.textContent = `Ты чокнулся с @${nick}${instaTxt}`;
+        }
+      } else {
+        els.status.textContent = (data && data.message) || 'Попробуй ещё раз';
+      }
+    } catch {
+      els.status.textContent = 'Нет связи. Проверь интернет';
+    }
+  }
+
+  async function doCheers(source) {
+    if (busy) return;
+    busy = true;
+    playSfx();
+    animateBottle();
+    await sendShake(source);
+    setTimeout(() => { busy = false; }, 600);
+  }
+
+  // --- Кнопка "Чок!" ---
+  if (els.shakeBtn) {
+    els.shakeBtn.addEventListener('click', () => doCheers('button'));
+  }
+
+  // --- Детектор тряски (мобильные) ---
+  let lastAccel = { x: null, y: null, z: null };
+  const THRESHOLD = 14;      // чувствительность
+  const MIN_INTERVAL = 1200; // не чаще 1.2с
+
+  function onMotion(e) {
+    const a = e.accelerationIncludingGravity || e.acceleration || {};
+    const { x, y, z } = a;
+    if ([x, y, z].some(v => typeof v !== 'number')) return;
+
+    if (lastAccel.x === null) {
+      lastAccel = { x, y, z };
+      return;
+    }
+    const dx = Math.abs(x - lastAccel.x);
+    const dy = Math.abs(y - lastAccel.y);
+    const dz = Math.abs(z - lastAccel.z);
+    lastAccel = { x, y, z };
+
+    const magnitude = dx + dy + dz;
+    const now = Date.now();
+
+    if (magnitude > THRESHOLD && (now - lastShakeAt) > MIN_INTERVAL) {
+      lastShakeAt = now;
+      doCheers('shake');
+      if (navigator.vibrate) { try { navigator.vibrate(40); } catch(_) {} }
+    }
+  }
+
+  async function enableShake() {
+    const Sensor = window.DeviceMotionEvent;
+    if (!Sensor) return;
+    try {
+      if (typeof Sensor.requestPermission === 'function') {
+        const p = await Sensor.requestPermission().catch(() => 'denied');
+        if (p !== 'granted') return;
+      }
+      window.addEventListener('devicemotion', onMotion, { passive: true });
+    } catch {}
+  }
+  enableShake();
+
+  // --- Тема (пример) ---
+  if (els.themeSel) {
+    els.themeSel.innerHTML = `
+      <option value="light">Светлая</option>
+      <option value="dark">Тёмная</option>
+    `;
+    els.themeSel.addEventListener('change', () => {
+      document.documentElement.dataset.theme = els.themeSel.value;
     });
   }
 
-  function playOpenFx() {
-    const sfx = (THEMES[currentTheme]?.sfx === 'can') ? 'sfx-can' : 'sfx-bottle';
-    const a = document.getElementById(sfx);
-    try { a && (a.currentTime = 0, a.play()); } catch {}
-    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.('success');
-
-    const b = $('bottle'), c = $('cap'), f = $('foam');
-    if (b){ b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
-    if (c){ c.classList.remove('pop');  void c.offsetWidth; c.classList.add('pop'); }
-    if (f){ f.classList.remove('spray');void f.offsetWidth; f.classList.add('spray'); }
-  }
-
-  // ====== контакт в бота (1 раз, опционально) ======
-  function sendContactToBot() {
-    if (!tg || !telegramUser) return;
-    const c = telegramUser.username ? '@'+telegramUser.username : (telegramUser.first_name || ('id:'+telegramUser.id));
-    contactStr = c;
-    try { tg.sendData(JSON.stringify({ contact: c })); } catch {}
-  }
-
-  // ====== отправка «чока» ======
-  async function sendShake() {
-    const now = Date.now();
-    if (now - lastShakeTime < MIN_SHAKE_INTERVAL) return;
-    lastShakeTime = now;
-
-    animateBottle();
-    setStatus('Отправляем чок…');
-
-    const u = telegramUser;
-    const name = u.username ? '@'+u.username : (u.first_name || `user_${u.id}`);
-    const body = { telegramId: u.id, name, contact: contactStr || name };
-
-    try {
-      const r = await fetch(`${API_BASE}/shake`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await r.json().catch(() => ({}));
-
-      if (!r.ok) { setStatus(data.message || 'Ошибка сервера'); return; }
-
-      setStatus(data.message || 'Чок засчитан!');
-      const scoreEl = $('score');
-      if (scoreEl && typeof data.bonus === 'number') {
-        scoreEl.textContent = String((+scoreEl.textContent || 0) + data.bonus);
-      }
-      if (data.youGot) $('partner') && ($('partner').textContent = `Собеседник: ${data.youGot}`);
-
-      playOpenFx();
-    } catch {
-      setStatus('Не удалось отправить чок. Проверьте интернет.');
-    }
-  }
-
-  // ====== обработка движения (встряска) ======
-  function onMotion(ev) {
-    const a = ev.accelerationIncludingGravity || ev.acceleration;
-    if (!a) return;
-    const dx = (lastAccel.x == null ? 0 : Math.abs(a.x - lastAccel.x));
-    const dy = (lastAccel.y == null ? 0 : Math.abs(a.y - lastAccel.y));
-    const dz = (lastAccel.z == null ? 0 : Math.abs(a.z - lastAccel.z));
-    lastAccel = { x: a.x, y: a.y, z: a.z };
-    const m = Math.sqrt(dx*dx + dy*dy + dz*dz);
-    if (m > SHAKE_THRESHOLD) sendShake();
-  }
-
-  // ====== старт ======
-  window.addEventListener('DOMContentLoaded', async () => {
-    try {
-      // применяем тему заранее (чтобы не мигало)
-      applyTheme(currentTheme);
-      mountThemeSelector();
-
-      await ensureTgReady();
-      setStatus('Загрузка...');
-
-      telegramUser = extractUser() || await waitForUser(2000);
-      if (!telegramUser) { showOpenFromBot(); return; }
-
-      showUser(telegramUser);
-
-      // «Чок!» — праймим аудио, просим доступ к датчикам, отправляем контакт
-      $('shakeBtn')?.addEventListener('click', async () => {
-        primeAudio();
-        try {
-          await ensureMotionPermission();
-          if (!contactStr) sendContactToBot();
-          setStatus('Готово! Встряхните телефоны рядом.');
-        } catch {}
-      });
-
-      window.addEventListener('devicemotion', onMotion, { passive: true });
-    } catch {
-      showOpenFromBot();
-    }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) els.status.textContent = 'Готов к чок 🥂';
   });
 })();

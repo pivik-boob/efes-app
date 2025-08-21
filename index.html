@@ -29,8 +29,19 @@
 
     <button class="btn" id="shakeBtn">Чок!</button>
 
+    <!-- Instagram input -->
+    <div class="insta-row" style="margin-top:10px;">
+      Instagram:
+      <input type="text" id="instaInput" placeholder="@your_insta"
+             style="padding:6px 8px; border:1px solid #ccc; border-radius:6px;"/>
+      <button id="saveInstaBtn"
+              style="margin-left:5px; padding:6px 8px; border:none; background:#0f5ea8; color:white; border-radius:6px; cursor:pointer;">
+        💾
+      </button>
+    </div>
+
     <!-- Селектор темы -->
-    <div class="theme-row">
+    <div class="theme-row" style="margin-top:10px;">
       Тема:
       <select id="themeSel"></select>
     </div>
@@ -44,8 +55,9 @@
 
   <!-- Адрес backend (Render) и имя бота -->
   <script>
+    // ❗️Поставь свой прод-адрес бэкенда
     window.__API_BASE__ = 'https://efes-app.onrender.com';
-    // ❗️замени на реальное @имя_бота без @ (пример: 'EfesConnectBot')
+    // ❗️замени на реальное имя бота без @ (пример: 'EfesConnectBot')
     window.__BOT_USERNAME__ = 'EfesConnectBot';
   </script>
 
@@ -58,6 +70,6 @@
   </audio>
 
   <!-- Скрипт приложения -->
-  <script src="/script2.js?v=108" defer></script>
+  <script src="/script2.js" defer></script>
 </body>
 </html>
