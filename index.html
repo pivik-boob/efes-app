@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Efes Чок</title>
 
-  <!-- Telegram Mini App -->
+  <!-- Telegram Mini App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <!-- Стили -->
@@ -14,21 +14,42 @@
 <body>
   <div class="card">
     <h1>🍺 Efes Club Card</h1>
+
     <h2 id="username">Загрузка...</h2>
     <p>Бонусов: <span id="score">0</span></p>
     <p id="status">Готов к чок 🥂</p>
     <p id="partner"></p>
-    <img id="bottle" src="efes-bottle.png" alt="Efes Bottle" style="width: 100px; margin: 20px auto; display: block;">
+
+    <!-- БЛОК БУТЫЛКИ (оставили маленькую) -->
+    <div id="bottleWrap" class="bottle-wrap">
+      <img id="bottle" class="bottle-img" src="efes-bottle.png" alt="Efes Bottle">
+      <div id="cap" class="cap" aria-hidden="true"></div>
+      <div id="foam" class="foam" aria-hidden="true"></div>
+    </div>
+
     <button class="btn" id="shakeBtn">Чок!</button>
+
+    <!-- Селектор темы (сейчас работает как переключатель фон/звук; позже подцепим разные банки/скины) -->
+    <div class="theme-row">
+      Тема:
+      <select id="themeSel"></select>
+    </div>
   </div>
 
-  <!-- 🔽 вот сюда вставляем перед подключением script2.js -->
+  <!-- Адрес твоего backend (Render) -->
   <script>
-    // Укажи здесь адрес, где запущен твой backend (server.js)
-    // Например, если на Render:
-    window.__API_BASE__ = 'https://efes-backend.onrender.com';
+    window.__API_BASE__ = 'https://efes-app.onrender.com';
   </script>
 
-  <script src="/script2.js?v=13" defer></script>
+  <!-- ЗВУКИ ОТКРЫТИЯ (положи файлы в /sounds/) -->
+ <audio id="sfx-bottle" preload="auto">
+  <source src="sounds/bottle_open.mp3" type="audio/mpeg">
+</audio>
+<audio id="sfx-can" preload="auto">
+  <source src="sounds/can_open.mp3" type="audio/mpeg">
+</audio>
+
+  <!-- Твой скрипт приложения -->
+  <script src="/script2.js?v=101" defer></script>
 </body>
 </html>

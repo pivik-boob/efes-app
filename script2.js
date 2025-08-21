@@ -1,207 +1,254 @@
-// script2.js — фикс получения user на мобилках + чок только по встряске
-// В index.html ДО этого файла должен быть SDK:
-// <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
+// script2.js — устойчивый старт в Telegram Mini App + чок по встряске
 (function () {
-  const API_BASE = (window.__API_BASE__ || '').trim() || `${location.origin}`; // твой backend (HTTPS!)
+  // ------------- настройки/состояние -------------
+  const API_BASE = (window.__API_BASE__ || 'https://efes-app.onrender.com').replace(/\/+$/,'');
+  const SHAKE_THRESHOLD = 15;        // чувствительность встряски
+  const MIN_SHAKE_INTERVAL = 1500;   // мс между «чоками», чтобы не спамить
 
-  let telegramUser = null;
-  let score = 0;
-  let hasShaken = false;
+  let tg = null;              // Telegram.WebApp
+  let telegramUser = null;    // объект пользователя из initDataUnsafe
+  let hasMotionPermission = false;
   let lastShakeTime = 0;
-  const shakeThreshold = 15;
-  const minShakeInterval = 1500;
+  let lastAccel = { x: null, y: null, z: null };
+  let contactStr = '';        // что шлём как "contact" на бэк
 
+  // ------------- утилиты -------------
   const $ = (id) => document.getElementById(id);
+  const safe = (s) => (s == null ? '' : String(s));
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  const log = async (msg, extra = {}) => {
+    try {
+      await fetch(`${API_BASE}/debug-log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg, ...extra })
+      });
+    } catch (_) { /* тихо */ }
+  };
+  // === АУДИО + ЭФФЕКТ ОТКРЫТИЯ ===
+let __audioPrimed = false;
 
-    if (!tg) {
-      $('status') && ($('status').textContent = 'Откройте мини-апп внутри Telegram (через бота).');
-      console.warn('Telegram.WebApp не найден');
+function primeAudio(){
+  if (__audioPrimed) return;
+  ['sfx-bottle','sfx-can'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.volume = 0.95;
+    try {
+      el.play().then(()=>{ el.pause(); el.currentTime = 0; __audioPrimed = true; }).catch(()=>{});
+    } catch {}
+  });
+}
+
+function playOpenFx(kind='bottle'){
+  // звук
+  const audio = document.getElementById(kind === 'can' ? 'sfx-can' : 'sfx-bottle');
+  try { audio && (audio.currentTime = 0, audio.play()); } catch {}
+
+  // хаптик (в вебвью Телеги)
+  window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.('success');
+
+  // анимации (работают даже если cap/foam не добавлены — просто пропустятся)
+  const bottle = document.getElementById('bottle');
+  const cap    = document.getElementById('cap');
+  const foam   = document.getElementById('foam');
+  if (bottle){ bottle.classList.remove('bump'); void bottle.offsetWidth; bottle.classList.add('bump'); }
+
+  if (cap){   cap.classList.remove('pop');   void cap.offsetWidth;   cap.classList.add('pop'); }
+  if (foam){  foam.classList.remove('spray');void foam.offsetWidth;  foam.classList.add('spray'); }
+}
+
+  // ------------- инициализация Telegram -------------
+  const ensureTgReady = async () => {
+    if (!window.Telegram || !window.Telegram.WebApp) {
+      await log('No Telegram.WebApp on window');
+      throw new Error('Откройте мини-апп из бота Telegram');
+    }
+    tg = window.Telegram.WebApp;
+    try { tg.ready(); } catch (_) {}
+    await log('TG ready', { platform: tg.platform });
+    return tg;
+  };
+
+  // ------------- получаем пользователя -------------
+  const getTgUser = () => {
+    const u = tg?.initDataUnsafe?.user;
+    return u && u.id ? u : null;
+  };
+
+  // ------------- UI заполнение -------------
+  const showUser = (u) => {
+    const name = u.first_name || u.username || `user_${u.id}`;
+    $('username') && ($('username').textContent = `${name}  #${u.id}`);
+    $('status') && ($('status').textContent = 'Готов! Теперь дайте доступ к датчикам и встряхните телефон.');
+  };
+
+  const showOpenFromBot = () => {
+    $('username') && ($('username').textContent = 'Загрузка…');
+    $('status') && ($('status').textContent = 'Нет данных пользователя. Откройте мини-апп из бота.');
+  };
+
+  // ------------- разрешение на акселерометр (iOS) -------------
+  const ensureMotionPermission = async () => {
+    if (typeof DeviceMotionEvent === 'undefined') return true;
+    if (typeof DeviceMotionEvent.requestPermission !== 'function') return true;
+
+    const st = await DeviceMotionEvent.requestPermission().catch(() => 'denied');
+    hasMotionPermission = (st === 'granted');
+    if (!hasMotionPermission) {
+      $('status') && ($('status').textContent =
+        'Разрешите доступ к движению/акселерометру (нажмите "Чок!" и выберите Разрешить).');
+      throw new Error('motion permission denied');
+    }
+    return true;
+  };
+
+  // ------------- анимация бутылки -------------
+  const animateBottle = () => {
+    const img = $('bottle');
+    if (!img) return;
+    img.style.transition = 'transform 0.2s ease';
+    img.style.transform = 'rotate(15deg) scale(1.05)';
+    setTimeout(() => { img.style.transform = 'rotate(-10deg)'; }, 200);
+    setTimeout(() => { img.style.transform = 'rotate(0deg) scale(1)'; }, 400);
+  };
+
+  // ------------- отправка контакта боту (1 раз) -------------
+  const sendContactToBot = () => {
+    // @username если есть, иначе first_name#id
+    contactStr = telegramUser.username
+      ? `@${telegramUser.username}`
+      : `${telegramUser.first_name || 'user'}#${telegramUser.id}`;
+
+    try {
+      tg.sendData(JSON.stringify({ contact: contactStr }));
+      log('sendData sent', { contact: contactStr });
+    } catch (e) {
+      log('sendData error', { err: safe(e?.message) });
+    }
+  };
+
+  // ------------- отправка чока на backend -------------
+ const sendShake = async () => {
+  const now = Date.now();
+  if (now - lastShakeTime < MIN_SHAKE_INTERVAL) return;
+  lastShakeTime = now;
+
+  animateBottle();
+  $('status') && ($('status').textContent = 'Отправляем чок…');
+
+  const name = telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
+  const body = { telegramId: telegramUser.id, name, contact: contactStr || name };
+
+  try {
+    const r = await fetch(`${API_BASE}/shake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json().catch(() => ({}));
+    await log('shake resp', { ok: r.ok, data });
+
+    if (!r.ok) {
+      $('status') && ($('status').textContent = safe(data.message) || 'Ошибка сервера');
       return;
     }
 
-    tg.ready();
-    tg.expand();
-    (function diag() {
-  const tg = window.Telegram?.WebApp;
-  const el = document.getElementById('status');
-
-  if (!tg) { el && (el.textContent = 'WebApp SDK не найден'); return; }
-
-  const initLen = (tg.initData || '').length;
-  const hasUser = !!tg.initDataUnsafe?.user;
-  const uid = tg.initDataUnsafe?.user?.id || null;
-
-  el && (el.textContent =
-    `TMA ok · initData=${initLen} · user=${hasUser ? uid : 'none'}`);
-
-  // Доп.лог в консоль (видно в DevTools Vercel/браузера)
-  console.log('[TMA]', { initLen, user: tg.initDataUnsafe?.user, initData: tg.initData });
-})();
-// ---------- ЖЕЛЕЗОБЕТОННЫЙ способ получить user ----------
-function parseUserJson(maybeJson) {
-  try { return JSON.parse(maybeJson); } catch { /* not JSON */ }
-  // бывает двойное кодирование
-  try { return JSON.parse(decodeURIComponent(maybeJson)); } catch { /* no-op */ }
-  return null;
-}
-
-function getTGUser() {
-  // 1) нормальный путь
-  if (tg.initDataUnsafe?.user) return tg.initDataUnsafe.user;
-
-  // 2) fallback: tg.initData (строка "k=v&k2=v2")
-  if (tg.initData) {
-    try {
-      const p = new URLSearchParams(tg.initData);
-      const u = p.get('user');
-      const parsed = u && parseUserJson(u);
-      if (parsed?.id) return parsed;
-    } catch {}
-  }
-
-  // 3) запасной: tgWebAppData в hash (#tgWebAppData=...)
-  if (location.hash) {
-    try {
-      const hash = new URLSearchParams(location.hash.slice(1));
-      const tgData = hash.get('tgWebAppData');
-      if (tgData) {
-        const params = new URLSearchParams(tgData);
-        const u = params.get('user');
-        const parsed = u && parseUserJson(u);
-        if (parsed?.id) return parsed;
-      }
-    } catch {}
-  }
-
-  // 4) ещё один запасной: tgWebAppData может быть в query (?tgWebAppData=...)
-  if (location.search) {
-    try {
-      const qs = new URLSearchParams(location.search);
-      const tgData = qs.get('tgWebAppData');
-      if (tgData) {
-        const params = new URLSearchParams(tgData);
-        const u = params.get('user');
-        const parsed = u && parseUserJson(u);
-        if (parsed?.id) return parsed;
-      }
-    } catch {}
-  }
-
-  return null;
-}
-// ----------------------------------------------------------
-
-telegramUser = getTGUser();
-
-if (!telegramUser || !telegramUser.id) {
-  $('status') && ($('status').textContent = 'Нет данных пользователя. Откройте мини-апп из бота.');
-  console.warn('initData пуст. initDataLen=', (tg.initData||'').length, 'hash=', location.hash, 'search=', location.search);
-  return;
-}
-
-// Имя на карточке
-if ($('username')) {
-  const name = telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`;
-  $('username').textContent = `${name}  #${telegramUser.id}`; // ← вернули показ ID
-}
-
-
-
-    // ===== iOS: разрешение на датчики ТОЛЬКО по клику =====
-    async function ensureMotionPermission() {
-      if (typeof DeviceMotionEvent !== 'undefined' &&
-          typeof DeviceMotionEvent.requestPermission === 'function') {
-        const res = await DeviceMotionEvent.requestPermission();
-        if (res !== 'granted') {
-          $('status') && ($('status').textContent = 'Разрешите доступ к датчикам движения.');
-          throw new Error('Motion permission denied');
-        }
-      }
+    $('status') && ($('status').textContent = data.message || 'Чок засчитан!');
+    const scoreEl = $('score');
+    if (scoreEl && typeof data.bonus === 'number') {
+      // у тебя учёт очков на бэке; на фронте просто показываем инкремент визуально
+      scoreEl.textContent = String((+scoreEl.textContent || 0) + data.bonus);
+    }
+    if (data.youGot) {
+      $('partner') && ($('partner').textContent = `Собеседник: ${data.youGot}`);
     }
 
-    // ===== Отправка контакта (ТОЛЬКО из встряски) =====
-    function sendContact() {
-      if (hasShaken) return;
-      hasShaken = true;
+    // 🔊✨ эффект (звук + мини-анимация)
+    playOpenFx('bottle'); // ← добавленная строка
 
-      const bottle = $('bottle');
-      if (bottle) bottle.classList.add('shake');
+  } catch (e) {
+    await log('shake fetch error', { err: safe(e?.message) });
+    $('status') && ($('status').textContent = 'Не удалось отправить чок. Проверьте интернет.');
+  }
+};
+// === АУДИО + ЭФФЕКТ ОТКРЫТИЯ ===
+let __audioPrimed = false;
 
-      setTimeout(() => {
-        const contact = prompt('Введите ваш Telegram или Instagram:');
-        if (!contact) {
-          alert('Контакт не введён.');
-          hasShaken = false;
-          if (bottle) bottle.classList.remove('shake');
-          return;
-        }
+function primeAudio(){
+  if (__audioPrimed) return;
+  ['sfx-bottle','sfx-can'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.volume = 0.95;
+    try {
+      el.play().then(()=>{ el.pause(); el.currentTime = 0; __audioPrimed = true; }).catch(()=>{});
+    } catch {}
+  });
+}
 
-        const userData = {
-          telegramId: telegramUser.id,
-          name: telegramUser.first_name || telegramUser.username || `user_${telegramUser.id}`,
-          contact,
-          points: 1
-        };
+function playOpenFx(kind='bottle'){
+  // звук
+  const audio = document.getElementById(kind === 'can' ? 'sfx-can' : 'sfx-bottle');
+  try { audio && (audio.currentTime = 0, audio.play()); } catch {}
 
-        fetch(`${API_BASE}/shake`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userData)
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if ($('status')) $('status').textContent = data.message || 'OK';
+  // хаптик
+  window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.('success');
 
-            if (data.youGot) {
-              $('partner') && ($('partner').textContent = `чок с ${data.youGot}`);
-              score += (data.bonus || 0);
-              $('score') && ($('score').textContent = `Баллы: ${score}`);
-            }
-          })
-          .catch((err) => {
-            console.error('Ошибка:', err);
-            $('status') && ($('status').textContent = 'Ошибка соединения');
-          })
-          .finally(() => {
-            hasShaken = false;
-            if (bottle) bottle.classList.remove('shake');
-          });
-      }, 1500);
-    }
+  // лёгкая анимация (работает даже если нет cap/foam)
+  const bottle = document.getElementById('bottle');
+  const cap    = document.getElementById('cap');
+  const foam   = document.getElementById('foam');
+  if (bottle){ bottle.classList.remove('bump'); void bottle.offsetWidth; bottle.classList.add('bump'); }
+  if (cap){    cap.classList.remove('pop');     void cap.offsetWidth;    cap.classList.add('pop'); }
+  if (foam){   foam.classList.remove('spray');  void foam.offsetWidth;   foam.classList.add('spray'); }
+}
+  // ------------- обработка движения (встряска) -------------
+  const onMotion = (ev) => {
+    const a = ev.accelerationIncludingGravity || ev.acceleration;
+    if (!a) return;
 
-    // ===== Детектор встряски (он один вызывает sendContact) =====
-    window.addEventListener('devicemotion', (event) => {
-      const acc = event.accelerationIncludingGravity || event.acceleration;
-      const now = Date.now();
-      if (!acc) return;
+    const dx = (lastAccel.x == null ? 0 : Math.abs(a.x - lastAccel.x));
+    const dy = (lastAccel.y == null ? 0 : Math.abs(a.y - lastAccel.y));
+    const dz = (lastAccel.z == null ? 0 : Math.abs(a.z - lastAccel.z));
+    lastAccel = { x: a.x, y: a.y, z: a.z };
 
-      const total = Math.sqrt(
-        (acc.x || 0) ** 2 +
-        (acc.y || 0) ** 2 +
-        (acc.z || 0) ** 2
-      );
+    const magnitude = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (magnitude > SHAKE_THRESHOLD) sendShake();
+  };
 
-      if (total > shakeThreshold && now - lastShakeTime > minShakeInterval) {
-        lastShakeTime = now;
-        sendContact(); // обмен только после реальной встряски
+  // ------------- старт приложения -------------
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      await ensureTgReady();
+      telegramUser = getTgUser();
+
+      if (!telegramUser) {
+        showOpenFromBot();
+        return;
       }
-    });
 
-    // ===== Кнопка "Чок!" — только запрос прав (не отправляет контакт) =====
-    const btn = $('shakeBtn');
-    if (btn) {
-      btn.addEventListener('click', async () => {
-        try {
-          await ensureMotionPermission();
-          $('status') && ($('status').textContent = 'Готово! Теперь встряхните телефоны вместе.');
-        } catch {
-          // подсказку уже показали
-        }
-      });
+      showUser(telegramUser);
+      await log('user ok', { id: telegramUser.id });
+
+      // Кнопка «Чок!» — просим разрешение + шлём контакт боту (1 раз)
+    $('shakeBtn')?.addEventListener('click', async () => {
+  primeAudio();
+  try {
+    await ensureMotionPermission();
+    if (!contactStr) sendContactToBot();
+    $('status') && ($('status').textContent = 'Готово! Теперь встряхните телефоны вместе.');
+  } catch (_) {
+    // ...
+  }
+});
+
+      // Подписка на движение — после первого разрешения
+      window.addEventListener('devicemotion', onMotion);
+
+    } catch (e) {
+      await log('init error', { err: safe(e?.message) });
+      showOpenFromBot();
     }
   });
 })();
