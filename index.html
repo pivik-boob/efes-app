@@ -17,7 +17,7 @@
 
     <h2 id="username">Загрузка...</h2>
     <p>Бонусов: <span id="score">0</span></p>
-    <p id="status">Готов к чок 🥂</p>
+    <p id="status">Нажми «Чок!» → тряси телефон</p>
     <p id="partner"></p>
 
     <!-- Бутылочка -->
@@ -27,7 +27,11 @@
       <div id="foam" class="foam" aria-hidden="true"></div>
     </div>
 
-    <button class="btn" id="shakeBtn">Чок!</button>
+    <!-- Кнопка: включает режим «готов к тряске» -->
+    <button class="btn" id="shakeBtn" title="1) Нажми, 2) Тряси телефон">Чок!</button>
+    <div style="font-size:12px; opacity:.8; margin-top:4px;">
+      Шаги: <b>нажми «Чок!»</b> → <b>встряхни</b> в течение 10 сек.
+    </div>
 
     <!-- Instagram input -->
     <div class="insta-row" style="margin-top:10px;">
@@ -44,6 +48,12 @@
     <div class="theme-row" style="margin-top:10px;">
       Тема:
       <select id="themeSel"></select>
+    </div>
+
+    <!-- История чоков -->
+    <div id="historyBox" style="margin-top:12px; width:100%; text-align:left;">
+      <h3 style="margin:6px 0 4px;">История</h3>
+      <ul id="historyList" style="list-style:none; padding-left:0; margin:0; font-size:14px; opacity:0.95;"></ul>
     </div>
 
     <!-- Fallback-кнопка: покажется только если мини-апп открыли не из бота -->
@@ -63,7 +73,7 @@
 
   <!-- Звуки -->
   <audio id="sfx-bottle" preload="auto">
-    <source src="sounds/bottle_open.mp3" type="audio/mpeg">
+    <source src="bottle_open.mp3" type="audio/mpeg">
   </audio>
   <audio id="sfx-can" preload="auto">
     <source src="sounds/can_open.mp3" type="audio/mpeg">

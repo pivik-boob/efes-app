@@ -1,96 +1,147 @@
+/* ==== EFES BEER LOOK ==== */
+:root{
+  --efes-blue:#0f4c81;
+  --efes-blue-dark:#002244;
+  --efes-gold:#d4af37;
+  --efes-gold-bright:#ffd700;
+  --text:#fff;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+
 body {
   margin: 0;
-  padding: 0;
-  background-color: #ffffff;
-  font-family: 'Segoe UI', sans-serif;
+  padding: 20px;
+  font-family: 'Arial', sans-serif;
+  color: var(--text);
+  min-height: 100vh;
   display: flex;
   justify-content: center;
-  align-items: center;
-  height: 100vh;
+  align-items: flex-start;
+
+  background: linear-gradient(to bottom, var(--efes-blue), var(--efes-blue-dark));
+  background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 .card {
-  background-color: #fefefe;
-  border: 3px solid #004c97;
-  border-radius: 20px;
-  padding: 25px;
-  width: 90%;
+  width: 100%;
   max-width: 400px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  background: rgba(15, 30, 60, 0.92);
+  border: 2px solid var(--efes-gold);
+  border-radius: 20px;
+  padding: 20px;
   text-align: center;
+  box-shadow: 0 0 24px rgba(0,0,0,0.6);
 }
 
-h1 {
-  color: #004c97;
-  margin-bottom: 10px;
+.card h1 {
+  font-size: 28px;
+  margin: 0 0 10px;
+  color: var(--efes-gold-bright);
+  text-shadow: 0 0 8px rgba(0,0,0,0.7);
+}
+.card h2 { font-size: 20px; margin: 0 0 10px; }
+.card p  { margin: 6px 0; font-size: 15px; }
+
+/* ==== BOTTLE / ANIMATIONS ==== */
+.bottle-wrap {
+  position: relative;
+  width: 140px;               /* базовый “маленький” размер */
+  margin: 18px auto 8px;
+  will-change: transform;
+}
+.bottle-img {
+  width: 100%;
+  transform-origin: 50% 100%;
+  will-change: transform, filter;
+}
+.cap, .foam {
+  position: absolute;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.cap {
+  top: -15px; left: 30px;
+  width: 60px; height: 20px;
+  background: var(--efes-gold);
+  border-radius: 10px;
+  opacity: 0;
+  transform: translateY(0);
+  z-index: 3;
+}
+.foam {
+  top: -28px; left: 18px;
+  width: 90px; height: 44px;
+  background: #fff;
+  border-radius: 50%;
+  opacity: 0;
+  z-index: 2;
 }
 
-h2 {
-  color: #000;
-  margin-top: 0;
+/* KEYFRAMES */
+@keyframes growShake {
+  0%   { transform: scale(1.00) rotate(0deg); filter: drop-shadow(0 0 0 rgba(255,255,255,0)); }
+  8%   { transform: scale(1.10) rotate(-2deg); }
+  16%  { transform: scale(1.12) rotate(2deg); }
+  24%  { transform: scale(1.14) rotate(-2deg); }
+  32%  { transform: scale(1.16) rotate(2deg); }
+  40%  { transform: scale(1.18) rotate(-2deg); }
+  48%  { transform: scale(1.20) rotate(2deg); filter: drop-shadow(0 6px 14px rgba(255,255,255,0.25)); }
+  64%  { transform: scale(1.14) rotate(-1deg); }
+  80%  { transform: scale(1.08) rotate(1deg); }
+  100% { transform: scale(1.00) rotate(0deg); filter: drop-shadow(0 0 0 rgba(255,255,255,0)); }
 }
 
-p {
-  font-size: 18px;
-  margin: 10px 0;
+@keyframes popCap {
+  0%   { transform: translateY(0) rotate(0) scale(1); opacity: 1; }
+  70%  { transform: translateY(-48px) rotate(-25deg) scale(1.05); opacity: 1; }
+  100% { transform: translateY(-60px) rotate(-35deg) scale(1.05); opacity: 0; }
 }
 
+@keyframes foamSpray {
+  0%   { opacity: 1; transform: translateY(0) scale(0.6); }
+  60%  { opacity: .85; transform: translateY(-6px) scale(1.6); }
+  100% { opacity: 0; transform: translateY(-8px) scale(1.9); }
+}
+
+/* TRIGGER CLASSES */
+.bottle-img.growshake { animation: growShake .85s cubic-bezier(.2,.8,.2,1); }
+.cap.pop              { animation: popCap   .52s ease-out; }
+.foam.spray           { animation: foamSpray .9s ease-out; }
+
+/* ==== BUTTON & INPUTS ==== */
 .btn {
-  background-color: #fcb900;
-  color: #000;
-  border: none;
-  padding: 12px 24px;
+  background: linear-gradient(145deg, var(--efes-gold-bright), var(--efes-gold));
+  color: var(--efes-blue-dark);
   font-size: 18px;
-  border-radius: 12px;
+  font-weight: bold;
+  border: none;
+  border-radius: 50px;
+  padding: 12px 30px;
+  margin-top: 10px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: transform .15s ease, box-shadow .15s ease;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+}
+.btn:hover { transform: scale(1.04); box-shadow: 0 6px 15px rgba(0,0,0,0.5); }
+
+.insta-row { margin-top: 10px; display: flex; justify-content: center; align-items: center; gap: 6px; }
+.insta-row input {
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  color: #000;
 }
 
-.btn:hover {
-  background-color: #f4a300;
+#historyBox { margin-top: 14px; text-align: left; }
+#historyBox h3 {
+  font-size: 16px; color: var(--efes-gold-bright);
+  border-bottom: 1px solid var(--efes-gold); padding-bottom: 5px; margin: 6px 0 4px;
 }
+#historyList li { padding: 6px 0; border-bottom: 1px dashed rgba(255,215,0,.45); }
 
-/* bottle shaking */
-.shake {
-  animation: shake 0.5s;
-}
-
-@keyframes shake {
-  0% { transform: rotate(0); }
-  25% { transform: rotate(5deg); }
-  50% { transform: rotate(-5deg); }
-  75% { transform: rotate(5deg); }
-  100% { transform: rotate(0); }
-}.bottle-wrap{ position:relative; width:120px; margin:16px auto 8px; }
-.bottle-img{ width:100%; display:block; user-select:none; -webkit-user-drag:none; }
-.cap{ position:absolute; left:50%; top:-4px; width:26px; height:12px; transform:translateX(-50%);
-      border-radius:6px 6px 4px 4px; background:linear-gradient(#1e6aa8,#124a77);
-      box-shadow:0 1px 0 rgba(255,255,255,.4) inset, 0 2px 6px rgba(0,0,0,.25);
-      opacity:0; pointer-events:none; }
-.foam{ position:absolute; left:50%; bottom:calc(100% - 6px); width:12px; height:12px;
-       transform:translateX(-50%) scale(.3); border-radius:50%;
-       background:radial-gradient(circle at 50% 50%, #fff 0 40%, rgba(255,255,255,0) 60%),
-                  radial-gradient(circle at 35% 35%, rgba(255,255,255,.9), rgba(255,255,255,0) 60%);
-       filter:drop-shadow(0 2px 2px rgba(0,0,0,.15)); opacity:0; pointer-events:none; }
-
-.cap.pop    { animation: cap-pop .9s cubic-bezier(.2,.9,.3,1.1) forwards; }
-.foam.spray { animation: foam-spray .75s ease-out forwards; }
-.bottle-img.bump { animation: bottle-bump .45s ease-out; }
-
-@keyframes cap-pop{
-  0%{opacity:1; transform:translate(-50%,0) rotate(0deg)}
-  45%{transform:translate(-50%,-34px) rotate(-22deg)}
-  80%{transform:translate(-50%,-60px) rotate(-48deg); opacity:.9}
-  100%{transform:translate(-50%,-72px) rotate(-62deg); opacity:0}
-}
-@keyframes foam-spray{
-  0%{opacity:1; transform:translate(-50%,-6px) scale(.35)}
-  45%{opacity:1; transform:translate(-50%,-32px) scale(1.05)}
-  100%{opacity:0; transform:translate(-50%,-58px) scale(.2)}
-}
-@keyframes bottle-bump{
-  0%{transform:rotate(0) scale(1)}
-  25%{transform:rotate(10deg) scale(1.03)}
-  55%{transform:rotate(-6deg) scale(1.02)}
-  100%{transform:rotate(0) scale(1)}
-}
+/* optional dark/light theme hook */
+:root[data-theme="dark"] .card { background: rgba(10, 20, 40, 0.94); }

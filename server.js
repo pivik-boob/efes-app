@@ -1,4 +1,4 @@
-// server.js — единая точка входа: статика + API + Telegram webhook + "сведение пары"
+// server.js — статика + API + Telegram webhook + "сведение пары" + дневной лимит + ПЕРСИСТЕНТНЫЙ СЧЁТ
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
@@ -14,7 +14,7 @@ const {
   BASE_URL,                  // например: https://efes-app.onrender.com
   PORT = 3000,
   REDIS_URL,                 // опционально: если укажешь — будет надёжная память 24/7
-  ENFORCE_DAILY = '0',       // "1" — пара может "чокнуться" только 1 раз в день
+  ENFORCE_DAILY = '1',       // "1" — пара может "чокнуться" только 1 раз в день (по умолчанию включено)
   VERIFY_INIT_DATA = '0'     // "1" — строго проверять подпись initData от Telegram
 } = process.env;
 
@@ -56,7 +56,7 @@ app.post(`/bot${BOT_TOKEN}`, (req, res) => {
 });
 
 // ======================
-//    ХРАНИЛКА СОБЫТИЙ
+//    ХРАНИЛКА/ПРОФИЛИ/СЧЁТЫ
 // ======================
 let redis = null;
 if (REDIS_URL) {
@@ -75,7 +75,8 @@ if (REDIS_URL) {
 const mem = {
   recent: [],                 // последние ~5 секунд чоков
   profiles: new Map(),        // userId -> { username, insta }
-  pairs: new Map()            // "min-max:YYYY-MM-DD" -> 1
+  pairs: new Map(),           // "min-max:YYYY-MM-DD" -> 1 (один чок/день)
+  scores: new Map()           // userId -> total
 };
 
 function dayKey(ts = Date.now()) {
@@ -90,13 +91,11 @@ function pairKey(a, b, ts = Date.now()) {
   return `${x}-${y}:${dayKey(ts)}`;
 }
 
+// --- Профили ---
 async function recordProfile(userId, username, insta) {
   if (!userId) return;
   if (redis) {
-    await redis.hset(`profile:${userId}`, {
-      username: username || '',
-      insta: insta || ''
-    });
+    await redis.hset(`profile:${userId}`, { username: username || '', insta: insta || '' });
   } else {
     mem.profiles.set(String(userId), { username: username || '', insta: insta || '' });
   }
@@ -111,11 +110,11 @@ async function getProfile(userId) {
   return mem.profiles.get(String(userId)) || null;
 }
 
+// --- Очередь недавних чоков (для сведения пары) ---
 async function addRecentShake(userId, username, insta, ts) {
   if (redis) {
     const key = 'shake:recent';
     const payload = JSON.stringify({ userId, username, insta, ts });
-    // храним последние 5 секунд, порядок по времени
     await redis.zadd(key, ts, payload);
     await redis.zremrangebyscore(key, 0, ts - 5000);
   } else {
@@ -124,7 +123,6 @@ async function addRecentShake(userId, username, insta, ts) {
     mem.recent = mem.recent.filter(x => x.ts >= cutoff).slice(-200);
   }
 }
-
 async function findPartner(userId, ts, windowMs = 2500) {
   if (redis) {
     const key = 'shake:recent';
@@ -133,7 +131,6 @@ async function findPartner(userId, ts, windowMs = 2500) {
       .map(v => { try { return JSON.parse(v); } catch { return null; } })
       .filter(Boolean)
       .filter(x => String(x.userId) !== String(userId));
-    // берём самого "близкого" по времени с конца
     return candidates.length ? candidates[candidates.length - 1] : null;
   } else {
     for (let i = mem.recent.length - 1; i >= 0; i--) {
@@ -145,11 +142,10 @@ async function findPartner(userId, ts, windowMs = 2500) {
   }
 }
 
+// --- Дневной лимит (1 раз/день на пару) ---
 async function hasPairedToday(id1, id2, ts) {
   const key = pairKey(id1, id2, ts);
-  if (redis) {
-    return (await redis.exists(`pair:${key}`)) === 1;
-  }
+  if (redis) return (await redis.exists(`pair:${key}`)) === 1;
   return mem.pairs.has(key);
 }
 async function markPairedToday(id1, id2, ts) {
@@ -169,6 +165,29 @@ async function markPairedToday(id1, id2, ts) {
   }
 }
 
+// --- Персистентные очки (total) ---
+async function getTotal(userId) {
+  if (!userId) return 0;
+  if (redis) {
+    const v = await redis.get(`score:${userId}`);
+    return Number(v || 0);
+  } else {
+    return Number(mem.scores.get(String(userId)) || 0);
+  }
+}
+async function addScore(userId, delta = 1) {
+  if (!userId) return 0;
+  if (redis) {
+    const v = await redis.incrby(`score:${userId}`, delta);
+    return Number(v || 0);
+  } else {
+    const cur = Number(mem.scores.get(String(userId)) || 0) + delta;
+    mem.scores.set(String(userId), cur);
+    return cur;
+  }
+}
+
+// --- Проверка подписи initData (опционально) ---
 function verifyInitData(initDataStr, token) {
   try {
     const urlParams = new URLSearchParams(initDataStr);
@@ -191,19 +210,34 @@ function verifyInitData(initDataStr, token) {
 //        API
 // ======================
 
+// Быстрый эндпоинт прогресса при входе (возвращает total + профиль)
+app.post('/progress', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ ok: false, message: 'userId required' });
+    const total = await getTotal(userId);
+    const profile = await getProfile(userId);
+    return res.json({ ok: true, total, profile: profile || { username: null, insta: null } });
+  } catch (e) {
+    console.error('progress error', e);
+    res.status(500).json({ ok: false, message: 'server error' });
+  }
+});
+
 // Основной эндпоинт чока
 app.post('/shake', async (req, res) => {
   try {
     const { userId, username, insta, clientTs, source, device, initData } = req.body || {};
-    if (!userId) return res.status(400).json({ ok: false, message: 'userId required' });
+    if (!userId) return res.status(400).json({ ok: false, message: 'userId required', awarded: false });
 
     if (VERIFY_INIT_DATA === '1') {
       if (!initData || !verifyInitData(initData, BOT_TOKEN)) {
-        return res.status(401).json({ ok: false, message: 'invalid initData' });
+        return res.status(401).json({ ok: false, message: 'invalid initData', awarded: false });
       }
     }
 
     const ts = (typeof clientTs === 'number' && clientTs > 0) ? clientTs : Date.now();
+    const today = dayKey(ts);
 
     // сохраним профиль (username/insta)
     await recordProfile(userId, username, insta);
@@ -214,31 +248,66 @@ app.post('/shake', async (req, res) => {
     // ищем пару (кто-то другой в окне ~2.5с)
     let partner = await findPartner(userId, ts, 2500);
 
-    // ограничение "раз в день" (опционально)
-    if (partner && ENFORCE_DAILY === '1') {
-      const already = await hasPairedToday(userId, partner.userId, ts);
-      if (already) {
-        partner = null;
-      } else {
+    if (partner) {
+      // ограничение "раз в день"
+      if (ENFORCE_DAILY === '1') {
+        const already = await hasPairedToday(userId, partner.userId, ts);
+        if (already) {
+          // пара уже чокалась сегодня — не начисляем
+          const p = await getProfile(partner.userId);
+          const partnerPublic = {
+            userId: partner.userId,
+            username: p?.username || partner.username || null,
+            insta: p?.insta || partner.insta || null
+          };
+          const total = await getTotal(userId); // без изменения
+          return res.json({
+            ok: true,
+            message: 'Сегодня вы уже чокались вместе',
+            awarded: false,
+            date: today,
+            partner: partnerPublic,
+            total
+          });
+        }
+        // отмечаем пару на сегодня (и только теперь "начисляем")
         await markPairedToday(userId, partner.userId, ts);
       }
-    }
 
-    if (partner) {
-      // актуализируем данные партнёра из профиля
+      // начисляем очко ТОЛЬКО когда пара реальная
+      const newTotal = await addScore(userId, 1);
+
+      // актуализируем данные партнёра
       const p = await getProfile(partner.userId);
       const partnerPublic = {
         userId: partner.userId,
         username: p?.username || partner.username || null,
         insta: p?.insta || partner.insta || null
       };
-      return res.json({ ok: true, message: 'Чок засчитан!', bonus: 1, partner: partnerPublic });
+
+      return res.json({
+        ok: true,
+        message: 'Чок засчитан!',
+        awarded: true,
+        date: today,
+        partner: partnerPublic,
+        total: newTotal
+      });
     }
 
-    return res.json({ ok: true, message: 'Ожидаем второго чока...', bonus: 1, partner: null });
+    // Партнёр ещё не найден — ничего не начисляем
+    const total = await getTotal(userId);
+    return res.json({
+      ok: true,
+      message: 'Ожидаем второго чока...',
+      awarded: false,
+      date: today,
+      partner: null,
+      total
+    });
   } catch (e) {
     console.error('shake error', e);
-    res.status(500).json({ ok: false, message: 'server error' });
+    res.status(500).json({ ok: false, message: 'server error', awarded: false });
   }
 });
 
