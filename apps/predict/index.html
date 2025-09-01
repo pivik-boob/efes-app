@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Efes — Бутылочка с предсказаниями</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- можно переиспользовать общий style.css проекта -->
+  <link rel="stylesheet" href="../../style.css">
+
+  <style>
+    /* ===== ЕЩЁ БОЛЕЕ EFES-СТИЛЬ ДЛЯ ЭТОГО ЭКРАНА ===== */
+    .card { max-width: 440px; padding-top: 18px; }
+    .title-wrap { display:flex; align-items:center; justify-content:center; gap:10px; }
+    .badge-efes {
+      font-weight: 800; letter-spacing: .5px;
+      color: var(--efes-gold-bright, #ffd700);
+      background: linear-gradient(145deg, #154b8e, #052a58);
+      border: 1px solid rgba(255,215,0,.55);
+      padding: 4px 10px; border-radius: 999px; font-size: 12px;
+      box-shadow: 0 3px 10px rgba(0,0,0,.25) inset;
+    }
+
+    /* Блок бутылки */
+    .predict-stage {
+      position: relative;
+      width: 200px;
+      margin: 18px auto 6px;
+      filter: drop-shadow(0 8px 22px rgba(0,0,0,.35));
+    }
+    .predict-img {
+      width: 100%;
+      transform-origin: 50% 100%;
+      user-select: none; -webkit-user-drag: none;
+    }
+
+    /* Пузырёк-предсказание, выходит из горлышка */
+    .bubble {
+      position: absolute;
+      left: 50%;
+      bottom: 72%;
+      transform: translateX(-50%) translateY(10px) scale(.96);
+      max-width: 90vw;
+      width: 290px;
+      background: #ffffff;
+      color: #1b2b4a;
+      border-radius: 14px;
+      padding: 12px 14px;
+      text-align: left;
+      line-height: 1.35;
+      font-size: 15px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.25);
+      opacity: 0;
+      pointer-events: none;
+    }
+    :root[data-theme="dark"] .bubble {
+      background: rgba(255,255,255,.96);
+      color: #0e1a33;
+    }
+    .bubble::after {
+      /* «хвостик» к горлышку бутылки */
+      content: "";
+      position: absolute;
+      left: 50%; transform: translateX(-50%);
+      bottom: -10px;
+      border: 10px solid transparent;
+      border-top-color: #ffffff;
+    }
+    :root[data-theme="dark"] .bubble::after {
+      border-top-color: rgba(255,255,255,.96);
+    }
+
+    /* Анимация всплытия «из бутылки» */
+    @keyframes bubblePop {
+      0%   { transform: translateX(-50%) translateY(16px) scale(.9); opacity: 0; }
+      55%  { transform: translateX(-50%) translateY(-2px) scale(1.03); opacity: 1; }
+      100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+    }
+    .bubble.show { animation: bubblePop .38s cubic-bezier(.2,.8,.2,1) forwards; }
+
+    /* Лёгкая «дрожь» бутылки при клике */
+    @keyframes wobble {
+      0% { transform: rotate(0deg) scale(1.0); }
+      15%{ transform: rotate(-6deg) scale(1.06); }
+      35%{ transform: rotate(6deg)  scale(1.06); }
+      55%{ transform: rotate(-3deg) scale(1.02); }
+      75%{ transform: rotate(3deg)  scale(1.01); }
+      100%{ transform: rotate(0deg) scale(1.0); }
+    }
+    .predict-img.wobble { animation: wobble .7s ease; }
+
+    /* Искорки/пена около горлышка для магии */
+    .sparkle {
+      position: absolute; left: 50%; bottom: 78%;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: radial-gradient(circle, #fff 30%, rgba(255,255,255,0) 60%);
+      opacity: 0; pointer-events: none;
+      transform: translateX(-50%) translateY(0);
+    }
+    @keyframes fizz {
+      0%   { opacity: .0; transform: translateX(-50%) translateY(0) scale(.6); }
+      30%  { opacity: .9; }
+      100% { opacity: 0; transform: translateX(calc(-50% + var(--dx,0px))) translateY(-26px) scale(1.4); }
+    }
+    .sparkle.show { animation: fizz .9s ease-out forwards; }
+
+    .controls { margin-top:12px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+    .hint  { font-size: 13px; opacity: .85; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title-wrap">
+      <h1 style="margin:0;">🔮 Бутылочка</h1>
+      <div class="badge-efes">EFES</div>
+    </div>
+    <p class="hint">Ткни по бутылке — предсказание «вылетит» из горлышка c озвучкой</p>
+
+    <div class="predict-stage">
+      <img id="bottle" class="predict-img" src="./efes-bottle.png" alt="Efes Bottle">
+      <div id="bubble" class="bubble">Готово к магии ✨</div>
+      <div id="spark1" class="sparkle"></div>
+      <div id="spark2" class="sparkle" style="--dx:14px;"></div>
+      <div id="spark3" class="sparkle" style="--dx:-12px;"></div>
+    </div>
+
+    <div class="controls">
+      <button id="againBtn" class="btn">Ещё предсказание</button>
+      <button id="shuffleBtn" class="btn" style="background:transparent;color:inherit;border:1px solid rgba(0,0,0,.2);">
+        Перемешать заново
+      </button>
+    </div>
+
+    <div class="hint">Совет: включи звук 📣</div>
+
+    <!-- Аудио (скрыто) -->
+    <audio id="fortune-audio" preload="auto"></audio>
+  </div>
+
+  <!-- Тексты/аудио предсказаний -->
+  <script src="./predictions.js"></script>
+  <!-- Логика -->
+  <script src="./script.js" defer></script>
+</body>
+</html>
