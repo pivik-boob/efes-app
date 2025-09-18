@@ -1,602 +1,312 @@
-// server.js — один бот, два мини-аппа (cheers + predict) + API «чоков» + webhook
-// + живой онбординг, сценарий "интересы", и тест "Какая ты бутылочка Efes?"
 require('dotenv').config();
+
 const path = require('path');
-const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
-const TelegramBot = require('node-telegram-bot-api');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+const { z } = require('zod');
+const { PrismaClient } = require('@prisma/client');
+const { createHmac } = require('crypto');
+const QRCode = require('qrcode');
+const { v4: uuidv4 } = require('uuid');
 
-const app = express();
-app.set('trust proxy', 1);
+// ==== ENV
+const PORT = process.env.PORT || 3000;
+const PUBLIC_URL = process.env.PUBLIC_URL || '';         // напр. https://efes-app.onrender.com
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // подпись WebApp
+const REDIS_URL = process.env.REDIS_URL || '';           // опционально
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
 
-// ===== ENV =====
-const {
-  BOT_TOKEN,                 // обязательно
-  BASE_URL,                  // напр.: https://efes-app.onrender.com
-  PORT = 3000,
-  REDIS_URL,                 // если есть — очки/пары/состояния 24/7
-  ENFORCE_DAILY = '1',       // "1" — одна и та же пара может «чокнуться» 1 раз/день
-  VERIFY_INIT_DATA = '0'     // "1" — проверять подпись initData из Telegram
-} = process.env;
+// ==== Prisma
+const prisma = new PrismaClient();
 
-if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
-
-// ===== BOT (webhook mode) =====
-const bot = new TelegramBot(BOT_TOKEN, { polling: false });
-
-// ===== MIDDLEWARE =====
-app.use(cors());
-app.use(express.json({ limit: '1mb' }));
-
-// =======================
-//   СТАТИКА ДЛЯ ЧОКОВ (корень проекта -> /app/cheers)
-// =======================
-app.use('/app/cheers', express.static(path.join(__dirname)));
-app.get('/app/cheers', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// =======================
-//   СТАТИКА ДЛЯ ПРЕДСКАЗАНИЙ (apps/predict ИЛИ appps/predict)
-// =======================
-const CANDIDATES = [
-  path.join(__dirname, 'apps', 'predict'),
-  path.join(__dirname, 'appps', 'predict'),
-];
-const PREDICT_DIR = CANDIDATES.find(p => fs.existsSync(path.join(p, 'index.html'))) || CANDIDATES[0];
-
-app.use('/app/predict', express.static(PREDICT_DIR));
-app.get('/app/predict', (_req, res) => {
-  const file = path.join(PREDICT_DIR, 'index.html');
-  if (fs.existsSync(file)) return res.sendFile(file);
-  res.status(404).send('predict app not found');
-});
-
-// ассеты из корня
-app.use(express.static(path.join(__dirname)));
-
-// логи/health/debug
-app.use((req, _res, next) => { console.log(`${new Date().toISOString()} ${req.method} ${req.path}`); next(); });
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
-app.get('/debug', (_req, res) => {
-  res.json({
-    ok: true,
-    time: new Date().toISOString(),
-    env: {
-      BASE_URL: BASE_URL || 'NOT SET',
-      REDIS: REDIS_URL ? 'ON' : 'OFF',
-      ENFORCE_DAILY, VERIFY_INIT_DATA,
-      PREDICT_DIR
-    }
-  });
-});
-
-// ===== Webhook endpoint =====
-app.post(`/bot${BOT_TOKEN}`, (req, res) => { bot.processUpdate(req.body); res.sendStatus(200); });
-
-// ======================
-//    ХРАНИЛКА/ПРОФИЛИ/СЧЁТЫ (для «чоков»)
-// ======================
+// ==== Redis (опционально)
 let redis = null;
 if (REDIS_URL) {
-  try {
-    const IORedis = require('ioredis');
-    redis = new IORedis(REDIS_URL);
-    redis.on('error', (e) => console.error('Redis error:', e));
-    console.log('Redis connected');
-  } catch (e) {
-    console.warn('Cannot init Redis, fallback to memory:', e.message);
-    redis = null;
-  }
+  const Redis = require('ioredis');
+  redis = new Redis(REDIS_URL);
 }
-const mem = { recent: [], profiles: new Map(), pairs: new Map(), scores: new Map(), state: new Map() };
+const MATCH_WINDOW_MS = 2000;
 
-function dayKey(ts = Date.now()) {
-  const d = new Date(ts);
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+// ==== In-memory fallback для матчинга (локально)
+const pendingLocal = []; // [{uid, ts}]
+function localFindMatch(uid, ts) {
+  const i = pendingLocal.findIndex(s => s.uid !== uid && Math.abs(s.ts - ts) <= MATCH_WINDOW_MS);
+  if (i === -1) return null;
+  const partner = pendingLocal[i].uid;
+  pendingLocal.splice(i, 1);
+  return partner;
 }
-function pairKey(a, b, ts = Date.now()) { const [x, y] = [String(a), String(b)].sort(); return `${x}-${y}:${dayKey(ts)}`; }
-
-// ===== профили/очки/пары =====
-async function recordProfile(userId, username, insta) {
-  if (!userId) return;
-  if (redis) await redis.hset(`profile:${userId}`, { username: username || '', insta: insta || '' });
-  else mem.profiles.set(String(userId), { username: username || '', insta: insta || '' });
-}
-async function getProfile(userId) {
-  if (!userId) return null;
-  if (redis) {
-    const o = await redis.hgetall(`profile:${userId}`);
-    if (!o || Object.keys(o).length === 0) return null;
-    return { username: o.username || '', insta: o.insta || '' };
-  }
-  return mem.profiles.get(String(userId)) || null;
-}
-async function addRecentShake(userId, username, insta, ts) {
-  if (redis) {
-    const key = 'shake:recent';
-    const payload = JSON.stringify({ userId, username, insta, ts });
-    await redis.zadd(key, ts, payload);
-    await redis.zremrangebyscore(key, 0, ts - 5000);
-  } else {
-    mem.recent.push({ userId, username, insta, ts });
-    const cutoff = ts - 5000;
-    mem.recent = mem.recent.filter(x => x.ts >= cutoff).slice(-200);
-  }
-}
-async function findPartner(userId, ts, windowMs = 2500) {
-  if (redis) {
-    const key = 'shake:recent';
-    const arr = await redis.zrangebyscore(key, ts - windowMs, ts + windowMs);
-    const candidates = arr.map(v => { try { return JSON.parse(v); } catch { return null; } })
-      .filter(Boolean).filter(x => String(x.userId) !== String(userId));
-    return candidates.length ? candidates[candidates.length - 1] : null;
-  } else {
-    for (let i = mem.recent.length - 1; i >= 0; i--) {
-      const x = mem.recent[i];
-      if (String(x.userId) === String(userId)) continue;
-      if (Math.abs(x.ts - ts) <= windowMs) return x;
-    }
-    return null;
-  }
-}
-async function hasPairedToday(id1, id2, ts) {
-  const key = pairKey(id1, id2, ts);
-  if (redis) return (await redis.exists(`pair:${key}`)) === 1;
-  return mem.pairs.has(key);
-}
-async function markPairedToday(id1, id2, ts) {
-  const key = pairKey(id1, id2, ts);
-  if (redis) {
-    const pk = `pair:${key}`;
-    const now = new Date(ts);
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-    const ttl = Math.max(60, Math.floor((end - now) / 1000));
-    await redis.set(pk, '1', 'EX', ttl, 'NX');
-  } else mem.pairs.set(key, 1);
-}
-async function getTotal(userId) {
-  if (!userId) return 0;
-  if (redis) return Number(await redis.get(`score:${userId}`) || 0);
-  return Number(mem.scores.get(String(userId)) || 0);
-}
-async function addScore(userId, delta = 1) {
-  if (!userId) return 0;
-  if (redis) return Number(await redis.incrby(`score:${userId}`, delta) || 0);
-  const cur = Number(mem.scores.get(String(userId)) || 0) + delta;
-  mem.scores.set(String(userId), cur);
-  return cur;
-}
-function verifyInitData(initDataStr, token) {
-  try {
-    const urlParams = new URLSearchParams(initDataStr);
-    const hash = urlParams.get('hash'); urlParams.delete('hash');
-    const dataCheckString = Array.from(urlParams.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([k, v]) => `${k}=${v}`).join('\n');
-    const crypto = require('crypto');
-    const secret = crypto.createHash('sha256').update(token).digest();
-    const hmac = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
-    return hmac === hash;
-  } catch { return false; }
+function localAdd(uid, ts) {
+  pendingLocal.push({ uid, ts });
+  setTimeout(() => {
+    const j = pendingLocal.findIndex(s => s.uid === uid && s.ts === ts);
+    if (j >= 0) pendingLocal.splice(j, 1);
+  }, 5000);
 }
 
-// ======================
-//        API (CHEERS)
-// ======================
-app.post('/progress', async (req, res) => {
+// ==== App
+const app = express();
+app.set('trust proxy', 1);
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(compression());
+app.use(express.json({ limit: '512kb' }));
+app.use(express.urlencoded({ extended: true }));
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!ALLOWED_ORIGINS.length) return cb(null, true);
+    if (!origin) return cb(null, true);
+    cb(null, ALLOWED_ORIGINS.includes(origin));
+  }
+}));
+app.use('/api', rateLimit({ windowMs: 30_000, max: 120 }));
+
+// Статика
+app.use(express.static(path.join(__dirname)));
+
+// ==== Utils
+function dayStartUTC(d = new Date()) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+function normPairKey(a, b) {
+  a = String(a); b = String(b);
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
+}
+function checkTelegramInitData(initData) {
+  if (!TELEGRAM_BOT_TOKEN) return true;  // локально подпись можно не проверять
+  if (!initData) return false;
+  const usp = new URLSearchParams(initData);
+  const hash = usp.get('hash');
+  if (!hash) return false;
+  const arr = [];
+  usp.forEach((v, k) => { if (k !== 'hash') arr.push(`${k}=${v}`); });
+  arr.sort();
+  const dataCheckString = arr.join('\n');
+  const secretKey = require('crypto').createHmac('sha256', 'WebAppData')
+    .update(TELEGRAM_BOT_TOKEN).digest();
+  const calc = require('crypto').createHmac('sha256', secretKey)
+    .update(dataCheckString).digest('hex');
+  return calc === hash;
+}
+
+// ==== Schemas
+const ProfileSaveSchema = z.object({
+  uid: z.string().min(1),
+  name: z.string().min(1),
+  age: z.coerce.number().int().min(16).max(120),
+  mood: z.string().min(1),
+  contact: z.string().min(1),
+  tgInitData: z.string().optional()
+});
+const SaveDesignSchema = z.object({
+  uid: z.string().min(1),
+  design: z.string().min(1),
+  tgInitData: z.string().optional()
+});
+const ShakeSchema = z.object({
+  uid: z.string().min(1),
+  ts: z.coerce.number().int().optional(),
+  tgInitData: z.string().optional()
+});
+const GiftCreateSchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  message: z.string().optional(),
+  tgInitData: z.string().optional()
+});
+
+// ==== Health
+app.get('/healthz', async (_req, res) => {
   try {
-    const { userId } = req.body || {};
-    if (!userId) return res.status(400).json({ ok: false, message: 'userId required' });
-    const total = await getTotal(userId);
-    const profile = await getProfile(userId);
-    res.json({ ok: true, total, profile: profile || { username: null, insta: null } });
-  } catch (e) {
-    console.error('progress error', e);
-    res.status(500).json({ ok: false, message: 'server error' });
+    await prisma.$queryRaw`SELECT 1`;
+    if (redis) await redis.ping();
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ ok: false });
   }
 });
 
-app.post('/shake', async (req, res) => {
+// ==== Profile
+app.get('/api/profile', async (req, res, next) => {
   try {
-    const { userId, username, insta, clientTs, initData } = req.body || {};
-    if (!userId) return res.status(400).json({ ok: false, message: 'userId required', awarded: false });
-
-    if (VERIFY_INIT_DATA === '1') {
-      if (!initData || !verifyInitData(initData, BOT_TOKEN)) {
-        return res.status(401).json({ ok: false, message: 'invalid initData', awarded: false });
-      }
-    }
-
-    const ts = (typeof clientTs === 'number' && clientTs > 0) ? clientTs : Date.now();
-    const today = dayKey(ts);
-
-    await recordProfile(userId, username, insta);
-    await addRecentShake(userId, username, insta, ts);
-
-    const partner = await findPartner(userId, ts, 2500);
-    if (partner) {
-      if (ENFORCE_DAILY === '1') {
-        const already = await hasPairedToday(userId, partner.userId, ts);
-        if (already) {
-          const p = await getProfile(partner.userId);
-          const partnerPublic = { userId: partner.userId, username: p?.username || partner.username || null, insta: p?.insta || partner.insta || null };
-          const total = await getTotal(userId);
-          return res.json({ ok: true, message: 'Сегодня вы уже чокались вместе', awarded: false, date: today, partner: partnerPublic, total });
-        }
-        await markPairedToday(userId, partner.userId, ts);
-      }
-
-      const newTotal = await addScore(userId, 1);
-      const p = await getProfile(partner.userId);
-      const partnerPublic = { userId: partner.userId, username: p?.username || partner.username || null, insta: p?.insta || partner.insta || null };
-      return res.json({ ok: true, message: 'Чок засчитан!', awarded: true, date: today, partner: partnerPublic, total: newTotal });
-    }
-
-    const total = await getTotal(userId);
-    res.json({ ok: true, message: 'Ожидаем второго чока...', awarded: false, date: today, partner: null, total });
-  } catch (e) {
-    console.error('shake error', e);
-    res.status(500).json({ ok: false, message: 'server error', awarded: false });
-  }
+    const uid = String(req.query.uid || '');
+    if (!uid) return res.json({ exists: false, profile: null });
+    const p = await prisma.profile.findUnique({ where: { userId: uid } });
+    res.json({ exists: !!p, profile: p || null });
+  } catch (e) { next(e); }
 });
 
-// ======================
-//    БОТ: команды, живой онбординг, интересы, квиз-бутылочка
-// ======================
-
-// --- хранилище состояния диалогов (интересты/квиз) ---
-async function getState(userId) {
-  if (redis) {
-    const raw = await redis.get(`state:${userId}`);
-    return raw ? JSON.parse(raw) : {};
-  }
-  return mem.state.get(String(userId)) || {};
-}
-async function setState(userId, state, ttlSec = 3600) {
-  if (redis) {
-    await redis.set(`state:${userId}`, JSON.stringify(state), 'EX', ttlSec);
-  } else {
-    mem.state.set(String(userId), state);
-    setTimeout(() => mem.state.delete(String(userId)), ttlSec * 1000).unref?.();
-  }
-}
-async function clearState(userId) {
-  if (redis) await redis.del(`state:${userId}`);
-  else mem.state.delete(String(userId));
-}
-
-// --- приветствие/меню ---
-async function sendWelcome(chatId, user) {
-  const name = user?.first_name || 'друг';
-  const base = BASE_URL || `http://localhost:${PORT}`;
-  const text =
-`Привет, ${name}! 😄
-Я — *Пивик*, твой ассистент в мире *Efes* 🍻
-
-Вот что мы можем сделать прямо сейчас:
-
-• *🍺 Цифровая бутылочка* — чокнись, обменяйся контактами, копи баллы.
-• *🔮 Бутылочка-предсказания* — тапни по бутылке, и из горлышка «вылетит» предсказание с озвучкой.
-• *🎉 Найти тусовку по интересу* — подберу каналы и форматы под твой вайб.
-
-Выбирай опцию ниже:`;
-  const kb = {
-    inline_keyboard: [
-      [{ text: '🍺 Открыть цифровую бутылочку', web_app: { url: `${base}/app/cheers` } }],
-      [{ text: '🔮 Бутылочка с предсказаниями', web_app: { url: `${base}/app/predict` } }],
-      [{ text: '🎉 Найти тусовку по интересу', callback_data: 'menu_interests' }],
-      // календарь пока подождёт
-    ]
-  };
-  await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: kb });
-}
-
-// --- сценарий "интересы" ---
-const INTEREST_OPTIONS = [
-  { key: 'party',  label: '🕺 Вечеринки и тусовки' },
-  { key: 'active', label: '🏃‍♀️ Активный отдых' },
-  { key: 'theme',  label: '🎭 Тематические вечера' },
-  { key: 'eco',    label: '🌱 Эко-тусовки' }
-];
-
-function interestsKeyboard() {
-  return {
-    inline_keyboard: INTEREST_OPTIONS.map(o => [{ text: o.label, callback_data: `interests_${o.key}` }])
-      .concat([ [{ text: '↩️ В главное меню', callback_data: 'back_menu' }] ])
-  };
-}
-
-async function startInterestsFlow(chatId) {
-  const text =
-`Круто! Давай познакомимся поближе.
-Как тебе нравится проводить время? Выбери вариант — и я подберу каналы/форматы:`;
-  await bot.sendMessage(chatId, text, { reply_markup: interestsKeyboard() });
-}
-
-async function replyInterests(chatId, key) {
-  const baseText = 'Классно! Вот куда стоит заглянуть:';
-  // Плейсхолдеры ссылок — замени на свои каналы
-  const byKey = {
-    party: {
-      text: `${baseText}\n• *Efes Party Hub*\n• *Night Vibes*\n\nСледи за анонсами, находи новые знакомства и чокайся чаще 😉`,
-      links: [
-        { title: 'Efes Party Hub', url: 'https://t.me/efes_party' },
-        { title: 'Night Vibes',    url: 'https://t.me/night_vibes' }
-      ]
-    },
-    active: {
-      text: `${baseText}\n• *Outdoor & Beer*\n• *Ride&Run*\n\nМного активностей на свежем воздухе — а потом заслуженный Efes 🍺`,
-      links: [
-        { title: 'Outdoor & Beer', url: 'https://t.me/outdoor_beer' },
-        { title: 'Ride&Run',       url: 'https://t.me/ride_run' }
-      ]
-    },
-    theme: {
-      text: `${baseText}\n• *Efes Thematic*\n• *Trivia Nights*\n\nКвиз-вечера, киновстречи, музыкальные пятницы — выбери своё!`,
-      links: [
-        { title: 'Efes Thematic', url: 'https://t.me/efes_theme' },
-        { title: 'Trivia Nights', url: 'https://t.me/trivia_nights' }
-      ]
-    },
-    eco: {
-      text: `${baseText}\n• *Green Meetup*\n• *Eco&Friends*\n\nЭко-маршруты и добрые инициативы — и приятный чок в конце пути 🌿`,
-      links: [
-        { title: 'Green Meetup',  url: 'https://t.me/green_meet' },
-        { title: 'Eco&Friends',   url: 'https://t.me/eco_friends' }
-      ]
-    }
-  };
-  const pick = byKey[key] || byKey.party;
-  const kb = {
-    inline_keyboard: [
-      ...pick.links.map(l => [{ text: `➜ ${l.title}`, url: l.url }]),
-      [{ text: '↩️ В главное меню', callback_data: 'back_menu' }]
-    ]
-  };
-  await bot.sendMessage(chatId, pick.text, { parse_mode: 'Markdown', reply_markup: kb });
-}
-
-// --- тест "Какая ты бутылочка Efes?" ---
-const BRANDS = {
-  efes:   { title: 'EFES',              emoji: '🍺', desc: 'Классика, баланс, общительность. Ты легко заводишь новые знакомства и любишь дружеский чок.' },
-  miller: { title: 'Miller',            emoji: '✨', desc: 'Лёгкость и стиль. Предпочитаешь лёгкие форматы и уютные вечеринки.' },
-  bely:   { title: 'Белый Медведь',     emoji: '🐻', desc: 'Тёплый характер и надёжность. Ценишь компанию и долгие разговоры.' },
-  karag:  { title: 'Карагандинское',    emoji: '🛠️', desc: 'Аутентичность и характер. Любишь атмосферу локальных мест и честный вкус.' },
-  kruzh:  { title: 'Кружка свежего',    emoji: '🍻', desc: 'Свежесть и живость. Тебя тянет к событиям, где кипит жизнь.' },
-};
-
-const QUIZ = [
-  {
-    key: 'q1',
-    text: 'Где тебе комфортнее всего знакомиться?',
-    opts: [
-      { label: 'Громкая вечеринка', score: { kruzh:1, miller:1 } },
-      { label: 'Уютный бар',        score: { efes:1, bely:1 } },
-      { label: 'Локальный паб',     score: { karag:1, efes:1 } },
-    ]
-  },
-  {
-    key: 'q2',
-    text: 'Выбери вайб вечера:',
-    opts: [
-      { label: 'Лёгкий чилл',   score: { miller:1 } },
-      { label: 'Дружеский шум', score: { kruzh:1, efes:1 } },
-      { label: 'Аутентично',    score: { karag:1, bely:1 } },
-    ]
-  },
-  {
-    key: 'q3',
-    text: 'Что важнее всего?',
-    opts: [
-      { label: 'Баланс вкуса',     score: { efes:1 } },
-      { label: 'Атмосфера места',  score: { karag:1 } },
-      { label: 'Тёплая компания',  score: { bely:1 } },
-    ]
-  },
-  {
-    key: 'q4',
-    text: 'Как ты обычно проводишь выходные?',
-    opts: [
-      { label: 'Активно, на движении', score: { kruzh:1 } },
-      { label: 'Стильно и легко',      score: { miller:1 } },
-      { label: 'Дома с друзьями',      score: { bely:1, efes:1 } },
-    ]
-  },
-  {
-    key: 'q5',
-    text: 'Выбери плейлист:',
-    opts: [
-      { label: 'Хиты для тусовки', score: { kruzh:1, miller:1 } },
-      { label: 'Инди и уют',       score: { bely:1 } },
-      { label: 'Классика жанра',   score: { efes:1, karag:1 } },
-    ]
-  }
-];
-
-function quizStartKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: '🚀 Пройти тест', callback_data: 'quiz_start' }],
-      [{ text: '↩️ В главное меню', callback_data: 'back_menu' }]
-    ]
-  };
-}
-async function startBottleQuiz(chatId) {
-  const text =
-`Давай определим, какая *бутылочка Efes* — это ты 😄
-Ответь на 5 коротких вопросов — и я покажу результат c описанием и эмодзи.
-
-Готова/готов?`;
-  await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: quizStartKeyboard() });
-}
-function questionKeyboard(qIndex) {
-  const q = QUIZ[qIndex];
-  return {
-    inline_keyboard: [
-      ...q.opts.map((o, i) => [{ text: o.label, callback_data: `quiz_${qIndex}_${i}` }]),
-      [{ text: '↩️ В главное меню', callback_data: 'back_menu' }]
-    ]
-  };
-}
-function scoreAdd(dst, add) {
-  Object.entries(add).forEach(([k, v]) => { dst[k] = (dst[k] || 0) + v; });
-}
-function quizResult(scores) {
-  let bestKey = 'efes', bestVal = -1;
-  Object.keys(BRANDS).forEach(k => {
-    const v = scores[k] || 0;
-    if (v > bestVal) { bestVal = v; bestKey = k; }
-  });
-  return BRANDS[bestKey];
-}
-
-// --- меню/команды ---
-async function setupCommands() {
+app.post('/api/profile/save', async (req, res, next) => {
   try {
-    await bot.setMyCommands([
-      { command: 'start', description: 'Старт' },
-      { command: 'cheers', description: 'Открыть «Чок!»' },
-      { command: 'predict', description: 'Открыть «Предсказания»' },
-      { command: 'quiz', description: 'Тест: какая ты бутылочка' },
-      { command: 'interests', description: 'Подобрать тусовки по интересам' },
-      { command: 'help', description: 'Помощь' },
-    ]);
-  } catch (e) { console.warn('setMyCommands failed:', e.message); }
-}
-function mainMenu(chatId, user) { return sendWelcome(chatId, user); }
-
-// команды
-bot.onText(/\/start/, (msg) => mainMenu(msg.chat.id, msg.from));
-bot.onText(/\/cheers/, (msg) => {
-  const base = BASE_URL || `http://localhost:${PORT}`;
-  const text = `Открываю твою *цифровую бутылочку* 🍺\n\nНажми кнопку ниже — и попадаешь в мини-апп.`;
-  bot.sendMessage(msg.chat.id, text, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: [[{ text: '🍺 Чок!', web_app: { url: `${base}/app/cheers` } }]] }
-  });
-});
-bot.onText(/\/predict/, (msg) => {
-  const base = BASE_URL || `http://localhost:${PORT}`;
-  const text = `Готов(а) к магии? ✨\nТапни по бутылке — и предсказание вылетит прямо из горлышка.`;
-  bot.sendMessage(msg.chat.id, text, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: [[{ text: '🔮 Предсказания', web_app: { url: `${base}/app/predict` } }]] }
-  });
-});
-bot.onText(/\/interests/, (msg) => startInterestsFlow(msg.chat.id));
-bot.onText(/\/quiz/, (msg) => startBottleQuiz(msg.chat.id));
-bot.onText(/\/help/, (msg) => {
-  const text =
-`Я — *Пивик*, ассистент Efes 🍻
-Что умею:
-• Открывать цифровую бутылочку (чоки, баллы, знакомства)
-• Бутылочку-предсказания (тексты + озвучка)
-• Подбирать тусовки по интересу
-
-Команды:
-• /start — главное меню
-• /cheers — открыть «Чок!»
-• /predict — предсказания
-• /interests — подобрать тусовку
-• /quiz — тест «какая ты бутылочка»`;
-  bot.sendMessage(msg.chat.id, text, { parse_mode: 'Markdown' });
-});
-
-// callback-сценарии
-bot.on('callback_query', async (q) => {
-  const chatId = q.message.chat.id;
-  const base = BASE_URL || `http://localhost:${PORT}`;
-  const data = q.data || '';
-  const userId = q.from?.id;
-  bot.answerCallbackQuery(q.id).catch(()=>{});
-
-  // навигация
-  if (data === 'back_menu') return mainMenu(chatId, q.from);
-  if (data === 'menu_interests') return startInterestsFlow(chatId);
-
-  // интересы
-  if (data.startsWith('interests_')) {
-    const key = data.split('_')[1];
-    return replyInterests(chatId, key);
-  }
-
-  // квиз
-  if (data === 'quiz_start') {
-    const st = { quiz: { index: 0, scores: {} } };
-    await setState(userId, st, 3600);
-    const q0 = QUIZ[0];
-    await bot.sendMessage(chatId, `Вопрос 1/5\n\n*${q0.text}*`, { parse_mode: 'Markdown', reply_markup: questionKeyboard(0) });
-    return;
-  }
-  if (data.startsWith('quiz_')) {
-    const [, idxStr, optStr] = data.split('_'); // quiz_<index>_<optIndex>
-    const idx = Number(idxStr), optIndex = Number(optStr);
-    const st = await getState(userId);
-    if (!st.quiz || st.quiz.index !== idx) {
-      // рассинхрон — начнём заново
-      return startBottleQuiz(chatId);
+    const b = ProfileSaveSchema.parse(req.body);
+    if (!checkTelegramInitData(b.tgInitData)) {
+      return res.status(401).json({ ok: false, error: 'bad signature' });
     }
-    // учесть ответ
-    const qd = QUIZ[idx];
-    const opt = qd.opts[optIndex];
-    scoreAdd(st.quiz.scores, opt.score);
-    st.quiz.index = idx + 1;
-    await setState(userId, st, 3600);
+    await prisma.profile.upsert({
+      where: { userId: b.uid },
+      update: { name: b.name, age: b.age, mood: b.mood, contact: b.contact },
+      create: { userId: b.uid, name: b.name, age: b.age, mood: b.mood, contact: b.contact }
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
 
-    if (st.quiz.index >= QUIZ.length) {
-      const res = quizResult(st.quiz.scores);
-      await clearState(userId);
-      const text =
-`Готово! Твоя бутылочка — *${res.title}* ${res.emoji}
+app.post('/api/save_design', async (req, res, next) => {
+  try {
+    const b = SaveDesignSchema.parse(req.body);
+    if (!checkTelegramInitData(b.tgInitData)) {
+      return res.status(401).json({ ok: false, error: 'bad signature' });
+    }
+    await prisma.profile.upsert({
+      where: { userId: b.uid },
+      update: { design: b.design },
+      create: { userId: b.uid, name: '', age: 18, mood: '', contact: '', design: b.design }
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
 
-_${res.desc}_
+// ==== Shake match (Redis или локальный фоллбэк)
+async function redisFindMatch(uid, ts) {
+  const min = ts - MATCH_WINDOW_MS, max = ts + MATCH_WINDOW_MS;
+  // используем zset efes:pending
+  const key = 'efes:pending';
+  const candidates = await redis.zrangebyscore(key, min, max, 'LIMIT', 0, 30);
+  const partner = candidates.find(x => x !== uid);
+  if (!partner) return null;
+  const tx = redis.multi();
+  tx.zrem(key, uid);
+  tx.zrem(key, partner);
+  const results = await tx.exec();
+  if (!results || results[0][1] === 0 || results[1][1] === 0) return null;
+  return partner;
+}
+async function redisAdd(uid, ts) {
+  const key = 'efes:pending';
+  await redis.zadd(key, ts, uid);
+  await redis.expire(key, 15);
+}
 
-Хочешь ещё? Можем:
-• Открыть цифровую бутылочку и чокнуться с кем-то рядом
-• Выбрать тусовку по интересу`;
-      const kb = {
-        inline_keyboard: [
-          [{ text: '🍺 Цифровая бутылочка', web_app: { url: `${base}/app/cheers` } }],
-          [{ text: '🎉 Найти тусовку', callback_data: 'menu_interests' }],
-          [{ text: '↩️ В главное меню', callback_data: 'back_menu' }]
-        ]
-      };
-      return bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: kb });
+app.post('/api/shake', async (req, res, next) => {
+  try {
+    const b = ShakeSchema.parse(req.body);
+    if (!checkTelegramInitData(b.tgInitData)) {
+      return res.status(401).json({ status: 'error', error: 'bad signature' });
+    }
+    const ts = b.ts || Date.now();
+
+    let partnerId = null;
+    if (redis) {
+      partnerId = await redisFindMatch(b.uid, ts);
+      if (!partnerId) { await redisAdd(b.uid, ts); return res.json({ status: 'waiting' }); }
     } else {
-      const qn = QUIZ[st.quiz.index];
-      return bot.sendMessage(chatId, `Вопрос ${st.quiz.index+1}/${QUIZ.length}\n\n*${qn.text}*`, { parse_mode: 'Markdown', reply_markup: questionKeyboard(st.quiz.index) });
+      partnerId = localFindMatch(b.uid, ts);
+      if (!partnerId) { localAdd(b.uid, ts); return res.json({ status: 'waiting' }); }
     }
-  }
 
-  // прямые переходы на веб-аппы (если когда-то добавим кнопки без web_app)
-  if (data === 'menu_cheers') {
-    return bot.sendMessage(chatId, 'Открываю цифровую бутылочку:', {
-      reply_markup: { inline_keyboard: [[{ text: '🍺 Чок!', web_app: { url: `${base}/app/cheers` } }]] }
+    const pairKey = normPairKey(b.uid, partnerId);
+    const dayKey = dayStartUTC(new Date(ts));
+    await prisma.meeting.upsert({
+      where: { pairKey_dayKey: { pairKey, dayKey } },
+      update: {},
+      create: { userAId: String(b.uid), userBId: String(partnerId), pairKey, dayKey }
     });
-  }
-  if (data === 'menu_predict') {
-    return bot.sendMessage(chatId, 'Открываю бутылочку-предсказания:', {
-      reply_markup: { inline_keyboard: [[{ text: '🔮 Предсказания', web_app: { url: `${base}/app/predict` } }]] }
-    });
-  }
+
+    const you = await prisma.profile.findUnique({ where: { userId: String(b.uid) } });
+    const other = await prisma.profile.findUnique({ where: { userId: String(partnerId) } });
+    res.json({ status: 'matched', you, other, partner_id: String(partnerId) });
+  } catch (e) { next(e); }
 });
 
-// ===== Webhook =====
-async function setupWebhook() {
-  if (!BASE_URL) { console.warn('BASE_URL not set; skipping setWebHook'); return; }
-  const url = `${BASE_URL}/bot${BOT_TOKEN}`;
-  await bot.setWebHook(url);
-  console.log('Webhook set:', url);
-}
+// ==== Friends today
+app.get('/api/friends/today', async (req, res, next) => {
+  try {
+    const uid = String(req.query.uid || '');
+    const dayKey = dayStartUTC(new Date());
+    const rows = await prisma.meeting.findMany({
+      where: { dayKey },
+      select: { userAId: true, userBId: true }
+    });
+    const ids = new Set();
+    rows.forEach(m => { if (m.userAId === uid) ids.add(m.userBId); if (m.userBId === uid) ids.add(m.userAId); });
+    const list = await prisma.profile.findMany({ where: { userId: { in: [...ids] } } });
+    res.json({ list: list.map(p => ({ user_id: p.userId, profile: p })) });
+  } catch (e) { next(e); }
+});
 
-// ===== START =====
-app.listen(PORT, async () => {
-  console.log(`Server running on :${PORT}`);
-  try { await setupCommands(); } catch {}
-  try { await setupWebhook(); } catch (e) { console.error('Webhook setup failed:', e); }
+// ==== Gifts
+app.post('/api/gift/create', async (req, res, next) => {
+  try {
+    const b = GiftCreateSchema.parse(req.body);
+    if (!checkTelegramInitData(b.tgInitData)) {
+      return res.status(401).json({ ok: false, error: 'bad signature' });
+    }
+    const voucher = 'EFES-' + uuidv4().slice(0, 8).toUpperCase();
+
+    // ensure profiles
+    await prisma.profile.upsert({ where: { userId: String(b.from) }, update: {}, create: { userId: String(b.from), name: '', age: 18, mood: '', contact: '' }});
+    await prisma.profile.upsert({ where: { userId: String(b.to) },   update: {}, create: { userId: String(b.to),   name: '', age: 18, mood: '', contact: '' }});
+
+    await prisma.giftCode.create({
+      data: { voucher, fromUserId: String(b.from), toUserId: String(b.to), message: b.message || null }
+    });
+
+    const targetUrl = PUBLIC_URL ? `${PUBLIC_URL}/gift/${voucher}` : `voucher:${voucher}`;
+    const qr = await QRCode.toDataURL(targetUrl);
+    res.json({ ok: true, voucher, qr, targetUrl });
+  } catch (e) { next(e); }
+});
+
+app.get('/gift/:voucher', async (req, res, next) => {
+  try {
+    const v = req.params.voucher;
+    const g = await prisma.giftCode.findUnique({ where: { voucher: v } });
+    if (!g) return res.status(404).send('Voucher not found');
+    res.send(`
+      <html><body style="font-family:Arial">
+        <h2>Проверка подарка</h2>
+        <p><b>Код:</b> ${v}</p>
+        <p><b>От:</b> ${g.fromUserId}</p>
+        <p><b>Кому:</b> ${g.toUserId}</p>
+        <p><b>Сообщение:</b> ${g.message ?? '—'}</p>
+        <p><b>Статус:</b> ${g.redeemed ? 'УЖЕ ПОГАШЕН' : 'НЕ ИСПОЛЬЗОВАН'}</p>
+        <form method="POST" action="/api/gift/redeem" onsubmit="return confirm('Погасить?')">
+          <input type="hidden" name="voucher" value="${v}"/>
+          <button type="submit" ${g.redeemed ? 'disabled' : ''}>Погасить</button>
+        </form>
+      </body></html>
+    `);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/gift/redeem', async (req, res, next) => {
+  try {
+    const voucher = req.body?.voucher || req.query?.voucher;
+    if (!voucher) return res.status(400).send('No voucher');
+    const g = await prisma.giftCode.findUnique({ where: { voucher } });
+    if (!g) return res.status(404).send('Voucher not found');
+    if (g.redeemed) return res.send('Уже погашен');
+    await prisma.giftCode.update({ where: { voucher }, data: { redeemed: true } });
+    res.send('Успешно: пиво выдано ✅');
+  } catch (e) { next(e); }
+});
+
+// SPA fallback
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+// Error handler
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  console.error('[ERROR]', err);
+  if (err?.name === 'ZodError') return res.status(400).json({ ok:false, error:'invalid_input', details: err.errors });
+  res.status(500).json({ ok:false, error:'server_error' });
+});
+
+app.listen(PORT, () => {
+  console.log('Efes app listening on :' + PORT);
+  if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
+  console.log(REDIS_URL ? 'Redis: ENABLED' : 'Redis: fallback (local)');
 });

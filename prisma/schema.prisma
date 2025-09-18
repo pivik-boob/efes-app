@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Profile {
+  userId      String     @id
+  name        String
+  age         Int
+  mood        String
+  contact     String
+  design      String?
+  photoFileId String?
+  updatedAt   DateTime   @updatedAt
+  giftsFrom   GiftCode[] @relation("GiftsFrom")
+  giftsTo     GiftCode[] @relation("GiftsTo")
+}
+
+model Meeting {
+  id      String   @id @default(cuid())
+  userAId String
+  userBId String
+  pairKey String
+  dayKey  DateTime
+  metAt   DateTime @default(now())
+
+  @@unique([pairKey, dayKey])
+  @@index([dayKey])
+}
+
+model GiftCode {
+  voucher    String    @id
+  fromUserId String
+  toUserId   String
+  message    String?
+  redeemed   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime?
+
+  from Profile @relation("GiftsFrom", fields: [fromUserId], references: [userId])
+  to   Profile @relation("GiftsTo", fields: [toUserId], references: [userId])
+
+  @@index([toUserId])
+  @@index([fromUserId])
+}

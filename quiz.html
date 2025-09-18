@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Efes Quiz — Какая ты бутылочка?</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="card">
+    <h1>🍺 Efes Quiz</h1>
+    <p id="quizStatus">Ответь на 8 вопросов — подберём твою бутылочку по типу личности.</p>
+
+    <form id="quizForm" style="text-align:left">
+      <!-- 1. E/I -->
+      <fieldset>
+        <legend>1) Как начинаешь вечеринку?</legend>
+        <label><input type="radio" name="q1" value="E"> Сразу в общение, знакомлюсь со всеми</label><br>
+        <label><input type="radio" name="q1" value="I"> Осматриваюсь, держусь ближе к своим</label>
+      </fieldset><br>
+
+      <!-- 2. S/N -->
+      <fieldset>
+        <legend>2) Как выбираешь место?</legend>
+        <label><input type="radio" name="q2" value="S"> Проверенное, где уже было классно</label><br>
+        <label><input type="radio" name="q2" value="N"> Новое/необычное, хочется экспериментов</label>
+      </fieldset><br>
+
+      <!-- 3. T/F -->
+      <fieldset>
+        <legend>3) Когда друзья спорят, ты…</legend>
+        <label><input type="radio" name="q3" value="T"> Помогаю логично разрулить</label><br>
+        <label><input type="radio" name="q3" value="F"> Сглаживаю и поддерживаю атмосферу</label>
+      </fieldset><br>
+
+      <!-- 4. J/P -->
+      <fieldset>
+        <legend>4) План на вечер?</legend>
+        <label><input type="radio" name="q4" value="J"> Люблю план: где/когда/с кем</label><br>
+        <label><input type="radio" name="q4" value="P"> По наитию, импровизируем</label>
+      </fieldset><br>
+
+      <!-- 5. E/I -->
+      <fieldset>
+        <legend>5) Знакомства?</legend>
+        <label><input type="radio" name="q5" value="E"> Легко подхожу к людям</label><br>
+        <label><input type="radio" name="q5" value="I"> Предпочитаю тёплый круг</label>
+      </fieldset><br>
+
+      <!-- 6. S/N -->
+      <fieldset>
+        <legend>6) Музыка?</legend>
+        <label><input type="radio" name="q6" value="S"> Хиты, проверенные треки</label><br>
+        <label><input type="radio" name="q6" value="N"> Люблю новое и необычное</label>
+      </fieldset><br>
+
+      <!-- 7. T/F -->
+      <fieldset>
+        <legend>7) При выборе подарка</legend>
+        <label><input type="radio" name="q7" value="T"> Практичность и польза</label><br>
+        <label><input type="radio" name="q7" value="F"> Эмоции и символика</label>
+      </fieldset><br>
+
+      <!-- 8. J/P -->
+      <fieldset>
+        <legend>8) Если планы меняются…</legend>
+        <label><input type="radio" name="q8" value="J"> Нервничаю, люблю стабильность</label><br>
+        <label><input type="radio" name="q8" value="P"> Норм, подстроюсь</label>
+      </fieldset><br>
+
+      <button type="button" id="finishBtn" class="btn">Узнать мою бутылочку</button>
+    </form>
+
+    <p id="result" style="margin-top:10px"></p>
+
+    <div style="margin-top:12px">
+      <a href="/" style="color:#0f5ea8">← Вернуться к цифровой карте</a>
+    </div>
+  </div>
+
+  <script>
+    window.__API_BASE__ = (location.origin.includes('localhost'))
+      ? 'http://localhost:3000'
+      : location.origin;
+  </script>
+  <script src="quiz.js" defer></script>
+</body>
+</html>

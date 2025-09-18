@@ -10,11 +10,20 @@
 
   <!-- Стили -->
   <link rel="stylesheet" href="style.css">
+
+  <!-- НЕМНОГО ВИЗУАЛА ДЛЯ ВЫБОРА ДИЗАЙНА (можешь перенести в style.css) -->
+  <style>
+    .design-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:8px; }
+    .design-card { padding:10px; border:1px solid #d3d8e0; border-radius:10px; text-align:center; cursor:pointer; }
+    .design-card.selected { outline:2px solid #0f5ea8; border-color:#0f5ea8; }
+    .hint { font-size:12px; opacity:.8; }
+  </style>
 </head>
 <body>
   <div class="card">
     <h1>🍺 Efes Club Card</h1>
 
+    <!-- Статусная шапка -->
     <h2 id="username">Загрузка...</h2>
     <p>Бонусов: <span id="score">0</span></p>
     <p id="status">Нажми «Чок!» → тряси телефон</p>
@@ -29,12 +38,36 @@
 
     <!-- Кнопка: включает режим «готов к тряске» -->
     <button class="btn" id="shakeBtn" title="1) Нажми, 2) Тряси телефон">Чок!</button>
-    <div style="font-size:12px; opacity:.8; margin-top:4px;">
+    <div class="hint" style="margin-top:4px;">
       Шаги: <b>нажми «Чок!»</b> → <b>встряхни</b> в течение 10 сек.
     </div>
 
-    <!-- Instagram input -->
-    <div class="insta-row" style="margin-top:10px;">
+    <!-- АНКЕТА (показывается только если профиля ещё нет) -->
+    <div id="profileForm" style="display:none; text-align:left; margin-top:14px;">
+      <h3>Твоя мини-анкета</h3>
+      <label>Имя<br><input id="nameInput" type="text" placeholder="Как тебя зовут?" required></label><br><br>
+      <label>Возраст (16+)<br><input id="ageInput" type="number" min="16" max="120" placeholder="18" required></label><br><br>
+      <label>Настроение<br><input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required></label><br><br>
+      <label>Контакт (Telegram @username или Instagram)<br><input id="contactInput" type="text" placeholder="@nickname" required></label><br><br>
+      <button class="btn" id="saveProfileBtn">Сохранить анкету</button>
+    </div>
+
+    <!-- ВЫБОР ДИЗАЙНА (если ещё не выбран) -->
+    <div id="designSection" style="display:none; margin-top:16px;">
+      <h3>Выбери дизайн бутылочки</h3>
+      <div id="designOptions" class="design-grid">
+        <div class="design-card" data-design="classic">Классическая</div>
+        <div class="design-card" data-design="fest">Праздничная</div>
+        <div class="design-card" data-design="ornament">Креативная</div>
+      </div>
+      <button class="btn" id="saveDesignBtn" style="margin-top:8px;">Выбрать</button>
+      <div class="hint" style="margin-top:6px;">
+        Или пройди <a href="/quiz">тест «Какая ты бутылочка?»</a> — подберём автоматически.
+      </div>
+    </div>
+
+    <!-- Instagram input (оставляю как у тебя) -->
+    <div class="insta-row" style="margin-top:14px;">
       Instagram:
       <input type="text" id="instaInput" placeholder="@your_insta"
              style="padding:6px 8px; border:1px solid #ccc; border-radius:6px;"/>
@@ -44,7 +77,7 @@
       </button>
     </div>
 
-    <!-- Селектор темы -->
+    <!-- Селектор темы (оставляю как у тебя) -->
     <div class="theme-row" style="margin-top:10px;">
       Тема:
       <select id="themeSel"></select>
@@ -56,6 +89,13 @@
       <ul id="historyList" style="list-style:none; padding-left:0; margin:0; font-size:14px; opacity:0.95;"></ul>
     </div>
 
+    <!-- Действия -->
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+      <button class="btn" id="friendsBtn">Мои знакомства</button>
+      <button class="btn" id="giftBtn">Угостить 🍺</button>
+      <a class="btn" href="/quiz" style="text-decoration:none; display:inline-block; text-align:center;">Пройти тест</a>
+    </div>
+
     <!-- Fallback-кнопка: покажется только если мини-апп открыли не из бота -->
     <button id="openFromBotBtn"
             style="display:none; background:transparent; color:#0f5ea8; border:1px solid #0f5ea84a; border-radius:10px; padding:8px 10px; margin-top:8px; cursor:pointer;">
@@ -65,9 +105,11 @@
 
   <!-- Адрес backend (Render) и имя бота -->
   <script>
-    // ❗️Поставь свой прод-адрес бэкенда
+    // Если у тебя адрес стабильный и это он — оставляй так.
     window.__API_BASE__ = 'https://efes-app.onrender.com';
-    // ❗️замени на реальное имя бота без @ (пример: 'EfesConnectBot')
+    // Альтернатива (авто): window.__API_BASE__ = location.origin;
+
+    // Имя твоего бота без @
     window.__BOT_USERNAME__ = 'EfesConnectBot';
   </script>
 
