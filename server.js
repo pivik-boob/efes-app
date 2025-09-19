@@ -24,9 +24,22 @@ const prisma = new PrismaClient();
 
 // ==== Redis (опционально)
 let redis = null;
-if (REDIS_URL) {
-  const Redis = require('ioredis');
-  redis = new Redis(REDIS_URL);
+
+if (process.env.REDIS_URL) {
+  try {
+    const Redis = require("ioredis");
+    redis = new Redis(process.env.REDIS_URL, {
+      tls: process.env.REDIS_URL.startsWith("rediss://") ? {} : undefined,
+    });
+
+    redis.on("connect", () => console.log("Redis: CONNECTED"));
+    redis.on("error", (err) => console.error("Redis error:", err));
+  } catch (err) {
+    console.warn("Redis init failed, fallback to in-memory:", err.message);
+    redis = null;
+  }
+} else {
+  console.log("Redis: DISABLED (no REDIS_URL)");
 }
 const MATCH_WINDOW_MS = 2000;
 
