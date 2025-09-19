@@ -1,325 +1,408 @@
 require('dotenv').config();
 
-const path = require('path');
 const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
-const { z } = require('zod');
+const path = require('path');
+const crypto = require('crypto');
+const bodyParser = require('body-parser');
 const { PrismaClient } = require('@prisma/client');
-const { createHmac } = require('crypto');
-const QRCode = require('qrcode');
-const { v4: uuidv4 } = require('uuid');
 
-// ==== ENV
-const PORT = process.env.PORT || 3000;
-const PUBLIC_URL = process.env.PUBLIC_URL || '';         // напр. https://efes-app.onrender.com
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // подпись WebApp
-const REDIS_URL = process.env.REDIS_URL || '';           // опционально
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+const app = express();
+app.use(bodyParser.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false }));
 
-// ==== Prisma
+// ---------- Config ----------
+const PORT = process.env.PORT || 10000;
+const PUBLIC_URL = process.env.PUBLIC_URL || ''; // e.g. https://efes-app.onrender.com
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+// CORS (микро)
+app.use((req, res, next) => {
+  if (!ALLOWED_ORIGINS.length) return next();
+  const o = req.headers.origin;
+  if (o && ALLOWED_ORIGINS.includes(o)) {
+    res.setHeader('Access-Control-Allow-Origin', o);
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// ---------- Prisma ----------
 const prisma = new PrismaClient();
 
-// ==== Redis (опционально)
+// ---------- Optional Redis (for fast matching), with safe fallback ----------
 let redis = null;
-
+const memoryQueue = { waiting: null }; // fallback in-memory storage
 if (process.env.REDIS_URL) {
   try {
-    const Redis = require("ioredis");
+    const Redis = require('ioredis');
     redis = new Redis(process.env.REDIS_URL, {
-      tls: process.env.REDIS_URL.startsWith("rediss://") ? {} : undefined,
+      tls: process.env.REDIS_URL.startsWith('rediss://') ? {} : undefined,
     });
-
-    redis.on("connect", () => console.log("Redis: CONNECTED"));
-    redis.on("error", (err) => console.error("Redis error:", err));
-  } catch (err) {
-    console.warn("Redis init failed, fallback to in-memory:", err.message);
+    redis.on('connect', () => console.log('Redis: CONNECTED'));
+    redis.on('error', err => console.error('Redis error:', err?.message || err));
+  } catch (e) {
+    console.warn('Redis init failed, fallback to in-memory:', e.message);
     redis = null;
   }
 } else {
-  console.log("Redis: DISABLED (no REDIS_URL)");
-}
-const MATCH_WINDOW_MS = 2000;
-
-// ==== In-memory fallback для матчинга (локально)
-const pendingLocal = []; // [{uid, ts}]
-function localFindMatch(uid, ts) {
-  const i = pendingLocal.findIndex(s => s.uid !== uid && Math.abs(s.ts - ts) <= MATCH_WINDOW_MS);
-  if (i === -1) return null;
-  const partner = pendingLocal[i].uid;
-  pendingLocal.splice(i, 1);
-  return partner;
-}
-function localAdd(uid, ts) {
-  pendingLocal.push({ uid, ts });
-  setTimeout(() => {
-    const j = pendingLocal.findIndex(s => s.uid === uid && s.ts === ts);
-    if (j >= 0) pendingLocal.splice(j, 1);
-  }, 5000);
+  console.log('Redis: DISABLED (no REDIS_URL)');
 }
 
-// ==== App
-const app = express();
-app.set('trust proxy', 1);
-app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(compression());
-app.use(express.json({ limit: '512kb' }));
-app.use(express.urlencoded({ extended: true }));
-
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!ALLOWED_ORIGINS.length) return cb(null, true);
-    if (!origin) return cb(null, true);
-    cb(null, ALLOWED_ORIGINS.includes(origin));
-  }
-}));
-app.use('/api', rateLimit({ windowMs: 30_000, max: 120 }));
-
-// Статика
-app.use(express.static(path.join(__dirname)));
-
-// ==== Utils
-function dayStartUTC(d = new Date()) {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-function normPairKey(a, b) {
-  a = String(a); b = String(b);
-  return a < b ? `${a}-${b}` : `${b}-${a}`;
-}
-function checkTelegramInitData(initData) {
-  if (!TELEGRAM_BOT_TOKEN) return true;  // локально подпись можно не проверять
-  if (!initData) return false;
-  const usp = new URLSearchParams(initData);
-  const hash = usp.get('hash');
-  if (!hash) return false;
-  const arr = [];
-  usp.forEach((v, k) => { if (k !== 'hash') arr.push(`${k}=${v}`); });
-  arr.sort();
-  const dataCheckString = arr.join('\n');
-  const secretKey = require('crypto').createHmac('sha256', 'WebAppData')
-    .update(TELEGRAM_BOT_TOKEN).digest();
-  const calc = require('crypto').createHmac('sha256', secretKey)
-    .update(dataCheckString).digest('hex');
-  return calc === hash;
-}
-
-// ==== Schemas
-const ProfileSaveSchema = z.object({
-  uid: z.string().min(1),
-  name: z.string().min(1),
-  age: z.coerce.number().int().min(16).max(120),
-  mood: z.string().min(1),
-  contact: z.string().min(1),
-  tgInitData: z.string().optional()
-});
-const SaveDesignSchema = z.object({
-  uid: z.string().min(1),
-  design: z.string().min(1),
-  tgInitData: z.string().optional()
-});
-const ShakeSchema = z.object({
-  uid: z.string().min(1),
-  ts: z.coerce.number().int().optional(),
-  tgInitData: z.string().optional()
-});
-const GiftCreateSchema = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  message: z.string().optional(),
-  tgInitData: z.string().optional()
-});
-
-// ==== Health
-app.get('/healthz', async (_req, res) => {
+// ---------- Telegram WebApp signature verify ----------
+function verifyInitData(initDataRaw) {
   try {
-    await prisma.$queryRaw`SELECT 1`;
-    if (redis) await redis.ping();
-    res.json({ ok: true });
-  } catch {
+    if (!initDataRaw || !BOT_TOKEN) return { ok: false };
+    // initDataRaw — это querystring из Telegram WebApp (tg.initData)
+    // Проверка: HMAC-SHA256 по ключу secretKey = sha256(BOT_TOKEN)
+    const url = new URL('https://t.me/?' + initDataRaw); // чтобы легко парсить
+    const data = {};
+    for (const [k, v] of url.searchParams.entries()) data[k] = v;
+    const receivedHash = data.hash;
+    if (!receivedHash) return { ok: false };
+    delete data.hash;
+
+    const keys = Object.keys(data).sort();
+    const checkString = keys.map(k => `${k}=${data[k]}`).join('\n');
+
+    const secretKey = crypto.createHash('sha256').update(BOT_TOKEN).digest();
+    const calcHash = crypto.createHmac('sha256', secretKey).update(checkString).digest('hex');
+
+    if (calcHash !== receivedHash) return { ok: false };
+
+    // Достаём user.id
+    const userStr = data.user || '';
+    const user = userStr ? JSON.parse(userStr) : null;
+    const userId = user?.id ? String(user.id) : null;
+
+    return { ok: true, userId, raw: data, user };
+  } catch (e) {
+    console.error('verifyInitData error:', e.message);
+    return { ok: false };
+  }
+}
+
+// Миддлварь: достаём userId из Authorization (там лежит tg.initData)
+function authMiddleware(req, res, next) {
+  const initDataRaw = req.headers['authorization'] || req.body?.tgInitData || '';
+  const v = verifyInitData(initDataRaw);
+  if (!v.ok || !v.userId) return res.status(401).json({ ok: false, error: 'unauthorized' });
+  req.userId = v.userId;
+  req.tgUser = v.user || null;
+  next();
+}
+
+// ---------- Static ----------
+app.use(express.static(path.join(__dirname))); // index.html, quiz.html, style.css, script2.js, etc.
+
+// ---------- Health ----------
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// ---------- API: Profile ----------
+app.get('/api/profile', authMiddleware, async (req, res) => {
+  try {
+    const uid = req.query.uid || req.userId;
+    const p = await prisma.profile.findUnique({ where: { userId: String(uid) } });
+    if (!p) return res.json({ exists: false });
+    res.json({ exists: true, profile: p });
+  } catch (e) {
+    console.error(e);
     res.status(500).json({ ok: false });
   }
 });
 
-// ==== Profile
-app.get('/api/profile', async (req, res, next) => {
+// удобный эндпоинт как в script2.js
+app.get('/api/profile/me', authMiddleware, async (req, res) => {
   try {
-    const uid = String(req.query.uid || '');
-    if (!uid) return res.json({ exists: false, profile: null });
-    const p = await prisma.profile.findUnique({ where: { userId: uid } });
-    res.json({ exists: !!p, profile: p || null });
-  } catch (e) { next(e); }
+    const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
+    if (!p) return res.json({ profile: null });
+    res.json({ profile: p });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
 });
 
-app.post('/api/profile/save', async (req, res, next) => {
+app.post('/api/profile/save', authMiddleware, async (req, res) => {
   try {
-    const b = ProfileSaveSchema.parse(req.body);
-    if (!checkTelegramInitData(b.tgInitData)) {
-      return res.status(401).json({ ok: false, error: 'bad signature' });
-    }
-    await prisma.profile.upsert({
-      where: { userId: b.uid },
-      update: { name: b.name, age: b.age, mood: b.mood, contact: b.contact },
-      create: { userId: b.uid, name: b.name, age: b.age, mood: b.mood, contact: b.contact }
+    const userId = req.userId;
+    const { name, age, mood, contact, insta } = req.body || {};
+
+    // если прислали только instagram — тоже сохраняем в contact
+    const dataUpdate = {};
+    if (name) dataUpdate.name = String(name).slice(0, 120);
+    if (age) dataUpdate.age = Number(age);
+    if (mood) dataUpdate.mood = String(mood).slice(0, 120);
+    if (contact || insta) dataUpdate.contact = String(contact || insta).slice(0, 120);
+
+    const p = await prisma.profile.upsert({
+      where: { userId },
+      create: { userId, name: dataUpdate.name || 'Гость', age: dataUpdate.age || 18, mood: dataUpdate.mood || '', contact: dataUpdate.contact || '' },
+      update: dataUpdate,
     });
-    res.json({ ok: true });
-  } catch (e) { next(e); }
+    res.json({ ok: true, profile: p });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
 });
 
-app.post('/api/save_design', async (req, res, next) => {
+app.post('/api/save_design', authMiddleware, async (req, res) => {
   try {
-    const b = SaveDesignSchema.parse(req.body);
-    if (!checkTelegramInitData(b.tgInitData)) {
-      return res.status(401).json({ ok: false, error: 'bad signature' });
-    }
-    await prisma.profile.upsert({
-      where: { userId: b.uid },
-      update: { design: b.design },
-      create: { userId: b.uid, name: '', age: 18, mood: '', contact: '', design: b.design }
+    const userId = req.userId;
+    const { design } = req.body || {};
+    if (!design) return res.status(400).json({ ok: false, error: 'design required' });
+
+    const p = await prisma.profile.upsert({
+      where: { userId },
+      create: { userId, name: 'Гость', age: 18, mood: '', contact: '', design },
+      update: { design },
     });
-    res.json({ ok: true });
-  } catch (e) { next(e); }
+    res.json({ ok: true, profile: p });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
 });
 
-// ==== Shake match (Redis или локальный фоллбэк)
-async function redisFindMatch(uid, ts) {
-  const min = ts - MATCH_WINDOW_MS, max = ts + MATCH_WINDOW_MS;
-  // используем zset efes:pending
-  const key = 'efes:pending';
-  const candidates = await redis.zrangebyscore(key, min, max, 'LIMIT', 0, 30);
-  const partner = candidates.find(x => x !== uid);
-  if (!partner) return null;
-  const tx = redis.multi();
-  tx.zrem(key, uid);
-  tx.zrem(key, partner);
-  const results = await tx.exec();
-  if (!results || results[0][1] === 0 || results[1][1] === 0) return null;
-  return partner;
-}
-async function redisAdd(uid, ts) {
-  const key = 'efes:pending';
-  await redis.zadd(key, ts, uid);
-  await redis.expire(key, 15);
+// ---------- API: Shake (matchmaking) ----------
+const MATCH_WINDOW_MS = 2000;
+
+async function setWaiting(userId, ts) {
+  if (redis) {
+    const key = 'shake:waiting';
+    const val = JSON.stringify({ userId, ts });
+    // setex 2s
+    await redis.set(key, val, 'EX', Math.ceil(MATCH_WINDOW_MS / 1000));
+    return true;
+  } else {
+    memoryQueue.waiting = { userId, ts, expire: Date.now() + MATCH_WINDOW_MS };
+    return true;
+  }
 }
 
-app.post('/api/shake', async (req, res, next) => {
-  try {
-    const b = ShakeSchema.parse(req.body);
-    if (!checkTelegramInitData(b.tgInitData)) {
-      return res.status(401).json({ status: 'error', error: 'bad signature' });
+async function popWaiting() {
+  if (redis) {
+    const key = 'shake:waiting';
+    const val = await redis.get(key);
+    if (val) {
+      await redis.del(key);
+      try { return JSON.parse(val); } catch { return null; }
     }
-    const ts = b.ts || Date.now();
+    return null;
+  } else {
+    const v = memoryQueue.waiting;
+    if (v && v.expire >= Date.now()) {
+      memoryQueue.waiting = null;
+      return v;
+    }
+    memoryQueue.waiting = null;
+    return null;
+  }
+}
 
-    let partnerId = null;
-    if (redis) {
-      partnerId = await redisFindMatch(b.uid, ts);
-      if (!partnerId) { await redisAdd(b.uid, ts); return res.json({ status: 'waiting' }); }
+app.post('/api/shake', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const now = Date.now();
+    // проверим профиль
+    const self = await prisma.profile.findUnique({ where: { userId } });
+    if (!self) return res.json({ status: 'need_profile' });
+
+    const other = await popWaiting(); // пытаемся забрать ждущего
+    if (other && Math.abs(now - other.ts) <= MATCH_WINDOW_MS && other.userId !== userId) {
+      // нашли пару → фиксируем знакомство в БД
+      const partnerId = other.userId;
+      await prisma.meeting.create({
+        data: { aId: userId, bId: partnerId, createdAt: new Date() }
+      });
+
+      const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
+      return res.json({
+        status: 'matched',
+        other: { id: partnerId, name: partner?.name || 'Гость', contact: partner?.contact || '' }
+      });
     } else {
-      partnerId = localFindMatch(b.uid, ts);
-      if (!partnerId) { localAdd(b.uid, ts); return res.json({ status: 'waiting' }); }
+      // никого не было — встанем в очередь на MATCH_WINDOW_MS
+      await setWaiting(userId, now);
+      return res.json({ status: 'waiting' });
     }
-
-    const pairKey = normPairKey(b.uid, partnerId);
-    const dayKey = dayStartUTC(new Date(ts));
-    await prisma.meeting.upsert({
-      where: { pairKey_dayKey: { pairKey, dayKey } },
-      update: {},
-      create: { userAId: String(b.uid), userBId: String(partnerId), pairKey, dayKey }
-    });
-
-    const you = await prisma.profile.findUnique({ where: { userId: String(b.uid) } });
-    const other = await prisma.profile.findUnique({ where: { userId: String(partnerId) } });
-    res.json({ status: 'matched', you, other, partner_id: String(partnerId) });
-  } catch (e) { next(e); }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
 });
 
-// ==== Friends today
-app.get('/api/friends/today', async (req, res, next) => {
+// ---------- API: Friends (today) ----------
+app.get('/api/friends/today', authMiddleware, async (req, res) => {
   try {
-    const uid = String(req.query.uid || '');
-    const dayKey = dayStartUTC(new Date());
-    const rows = await prisma.meeting.findMany({
-      where: { dayKey },
-      select: { userAId: true, userBId: true }
-    });
-    const ids = new Set();
-    rows.forEach(m => { if (m.userAId === uid) ids.add(m.userBId); if (m.userBId === uid) ids.add(m.userAId); });
-    const list = await prisma.profile.findMany({ where: { userId: { in: [...ids] } } });
-    res.json({ list: list.map(p => ({ user_id: p.userId, profile: p })) });
-  } catch (e) { next(e); }
-});
+    const userId = req.userId;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
 
-// ==== Gifts
-app.post('/api/gift/create', async (req, res, next) => {
-  try {
-    const b = GiftCreateSchema.parse(req.body);
-    if (!checkTelegramInitData(b.tgInitData)) {
-      return res.status(401).json({ ok: false, error: 'bad signature' });
+    // встречи где userId участвовал
+    const list = await prisma.meeting.findMany({
+      where: {
+        createdAt: { gte: start, lte: end },
+        OR: [{ aId: userId }, { bId: userId }]
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const items = [];
+    for (const m of list) {
+      const otherId = m.aId === userId ? m.bId : m.aId;
+      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
+      items.push({ user_id: otherId, profile: p, at: m.createdAt });
     }
-    const voucher = 'EFES-' + uuidv4().slice(0, 8).toUpperCase();
+    res.json({ ok: true, list: items });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
+});
 
-    // ensure profiles
-    await prisma.profile.upsert({ where: { userId: String(b.from) }, update: {}, create: { userId: String(b.from), name: '', age: 18, mood: '', contact: '' }});
-    await prisma.profile.upsert({ where: { userId: String(b.to) },   update: {}, create: { userId: String(b.to),   name: '', age: 18, mood: '', contact: '' }});
+// ---------- API: History (simple) ----------
+app.get('/api/history', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const list = await prisma.meeting.findMany({
+      where: { OR: [{ aId: userId }, { bId: userId }] },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    });
+    const history = [];
+    for (const m of list) {
+      const otherId = m.aId === userId ? m.bId : m.aId;
+      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
+      history.push({ withName: p?.name || otherId, at: m.createdAt });
+    }
+    res.json({ ok: true, history });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
+});
 
-    await prisma.giftCode.create({
-      data: { voucher, fromUserId: String(b.from), toUserId: String(b.to), message: b.message || null }
+// ---------- API: Gifts ----------
+function genVoucher() {
+  // EFES-XXXX-XXXX
+  const a = crypto.randomBytes(2).toString('hex').toUpperCase();
+  const b = crypto.randomBytes(2).toString('hex').toUpperCase();
+  return `EFES-${a}-${b}`;
+}
+
+app.post('/api/gift/create', authMiddleware, async (req, res) => {
+  try {
+    const from = req.userId;
+    const { to = '', message = '' } = req.body || {};
+    const voucher = genVoucher();
+
+    const g = await prisma.giftCode.create({
+      data: {
+        code: voucher,
+        fromUserId: from,
+        toUserId: to ? String(to) : null,
+        message: String(message || ''),
+        status: 'NEW',
+        createdAt: new Date()
+      }
     });
 
-    const targetUrl = PUBLIC_URL ? `${PUBLIC_URL}/gift/${voucher}` : `voucher:${voucher}`;
-    const qr = await QRCode.toDataURL(targetUrl);
-    res.json({ ok: true, voucher, qr, targetUrl });
-  } catch (e) { next(e); }
+    const targetUrl = PUBLIC_URL ? `${PUBLIC_URL}/gift/${encodeURIComponent(voucher)}` : '';
+    res.json({ ok: true, voucher, targetUrl });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
 });
 
-app.get('/gift/:voucher', async (req, res, next) => {
+// простая страница проверки подарка
+app.get('/gift/:code', async (req, res) => {
   try {
-    const v = req.params.voucher;
-    const g = await prisma.giftCode.findUnique({ where: { voucher: v } });
-    if (!g) return res.status(404).send('Voucher not found');
-    res.send(`
-      <html><body style="font-family:Arial">
-        <h2>Проверка подарка</h2>
-        <p><b>Код:</b> ${v}</p>
-        <p><b>От:</b> ${g.fromUserId}</p>
-        <p><b>Кому:</b> ${g.toUserId}</p>
-        <p><b>Сообщение:</b> ${g.message ?? '—'}</p>
-        <p><b>Статус:</b> ${g.redeemed ? 'УЖЕ ПОГАШЕН' : 'НЕ ИСПОЛЬЗОВАН'}</p>
-        <form method="POST" action="/api/gift/redeem" onsubmit="return confirm('Погасить?')">
-          <input type="hidden" name="voucher" value="${v}"/>
-          <button type="submit" ${g.redeemed ? 'disabled' : ''}>Погасить</button>
-        </form>
-      </body></html>
-    `);
-  } catch (e) { next(e); }
+    const code = req.params.code;
+    const g = await prisma.giftCode.findUnique({ where: { code } });
+    if (!g) return res.status(404).send('Код не найден');
+
+    const redeemed = g.status === 'USED';
+    const html = `
+      <html><head><meta charset="utf-8"><title>Подарок EFES</title></head>
+      <body style="font-family:Arial;padding:20px">
+        <h2>Подарочный код: ${code}</h2>
+        <p>Статус: <b style="color:${redeemed ? 'green' : 'orange'}">${redeemed ? 'Погашен' : 'Новый'}</b></p>
+        ${g.message ? `<p>Сообщение: ${g.message}</p>` : ''}
+        ${!redeemed ? `<form method="POST" action="/api/gift/redeem">
+          <input type="hidden" name="code" value="${code}">
+          <button type="submit" style="padding:10px 16px">Погасить</button>
+        </form>` : '<p>Код уже использован.</p>'}
+      </body></html>`;
+    res.send(html);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Ошибка сервера');
+  }
 });
 
-app.post('/api/gift/redeem', async (req, res, next) => {
+app.post('/api/gift/redeem', express.urlencoded({ extended: true }), async (req, res) => {
   try {
-    const voucher = req.body?.voucher || req.query?.voucher;
-    if (!voucher) return res.status(400).send('No voucher');
-    const g = await prisma.giftCode.findUnique({ where: { voucher } });
-    if (!g) return res.status(404).send('Voucher not found');
-    if (g.redeemed) return res.send('Уже погашен');
-    await prisma.giftCode.update({ where: { voucher }, data: { redeemed: true } });
-    res.send('Успешно: пиво выдано ✅');
-  } catch (e) { next(e); }
+    const code = req.body.code;
+    const g = await prisma.giftCode.findUnique({ where: { code } });
+    if (!g) return res.status(404).send('Код не найден');
+    if (g.status === 'USED') return res.send('Код уже использован.');
+
+    await prisma.giftCode.update({ where: { code }, data: { status: 'USED', usedAt: new Date() } });
+    res.send('Код успешно погашен ✅');
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Ошибка сервера');
+  }
 });
 
-// SPA fallback
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+// ---------- Telegraf webhook (бот остаётся на вебхуке, как просила) ----------
+async function initBot() {
+  if (!BOT_TOKEN) { console.log('Bot: DISABLED (no TELEGRAM_BOT_TOKEN)'); return; }
+  if (!PUBLIC_URL) { console.log('Bot: PUBLIC_URL is empty — webhook cannot be set'); return; }
 
-// Error handler
-// eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
-  console.error('[ERROR]', err);
-  if (err?.name === 'ZodError') return res.status(400).json({ ok:false, error:'invalid_input', details: err.errors });
-  res.status(500).json({ ok:false, error:'server_error' });
-});
+  const { Telegraf } = require('telegraf');
+  const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 9000 });
 
+  bot.start(async (ctx) => {
+    const cardUrl = `${PUBLIC_URL}/`;
+    const quizUrl = `${PUBLIC_URL}/quiz`;
+    await ctx.reply(
+      'Привет! 👋 Открой мини-апп:',
+      {
+        reply_markup: {
+          keyboard: [[
+            { text: 'Открыть бутылочку', web_app: { url: cardUrl } },
+            { text: 'Какая ты бутылочка?', web_app: { url: quizUrl } }
+          ]],
+          resize_keyboard: true,
+          is_persistent: true
+        }
+      }
+    );
+  });
+  bot.command('help', (ctx) => ctx.reply('Нажми кнопку «Открыть бутылочку» или «Какая ты бутылочка?» ниже.'));
+
+  const webhookPath = process.env.TG_WEBHOOK_PATH || ('/tg/webhook/' + crypto.createHash('sha256').update(BOT_TOKEN).digest('hex').slice(0, 32));
+  app.use(bot.webhookCallback(webhookPath));
+
+  try {
+    await bot.telegram.setWebhook(`${PUBLIC_URL}${webhookPath}`);
+    console.log('Bot: webhook set to', `${PUBLIC_URL}${webhookPath}`);
+  } catch (e) {
+    console.error('Bot: setWebhook error:', e.message);
+  }
+}
+initBot().catch(console.error);
+
+// ---------- Start ----------
 app.listen(PORT, () => {
-  console.log('Efes app listening on :' + PORT);
+  console.log(`Efes app listening on :${PORT}`);
   if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
-  console.log(REDIS_URL ? 'Redis: ENABLED' : 'Redis: fallback (local)');
 });
