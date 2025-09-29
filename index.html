@@ -43,14 +43,28 @@
     </div>
 
     <!-- АНКЕТА (показывается только если профиля ещё нет) -->
-    <div id="profileForm" style="display:none; text-align:left; margin-top:14px;">
-      <h3>Твоя мини-анкета</h3>
-      <label>Имя<br><input id="nameInput" type="text" placeholder="Как тебя зовут?" required></label><br><br>
-      <label>Возраст (16+)<br><input id="ageInput" type="number" min="16" max="120" placeholder="18" required></label><br><br>
-      <label>Настроение<br><input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required></label><br><br>
-      <label>Контакт (Telegram @username или Instagram)<br><input id="contactInput" type="text" placeholder="@nickname" required></label><br><br>
-      <button class="btn" id="saveProfileBtn">Сохранить анкету</button>
-    </div>
+   <section id="editBlock" hidden style="text-align:left; margin-top:14px;">
+  <h3>Редактирование анкеты</h3>
+
+  <label>Имя<br>
+    <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
+  </label><br><br>
+
+  <label>Возраст (21+)<br>
+    <input id="ageInput" type="number" min="21" max="120" placeholder="18" required>
+  </label><br><br>
+
+  <label>Настроение<br>
+    <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
+  </label><br><br>
+
+  <label>Контакт (Telegram @username или Instagram)<br>
+    <input id="contactInput" type="text" placeholder="@nickname" required>
+  </label><br><br>
+
+  <button class="btn" id="saveProfileBtn">Сохранить</button>
+  <button class="btn" id="cancelEditBtn" style="margin-left:8px;background:#666;">Отменить</button>
+</section>
 
     <!-- ВЫБОР ДИЗАЙНА (если ещё не выбран) -->
     <div id="designSection" style="display:none; margin-top:16px;">
@@ -66,16 +80,6 @@
       </div>
     </div>
 
-    <!-- Instagram input (оставляю как у тебя) -->
-    <div class="insta-row" style="margin-top:14px;">
-      Instagram:
-      <input type="text" id="instaInput" placeholder="@your_insta"
-             style="padding:6px 8px; border:1px solid #ccc; border-radius:6px;"/>
-      <button id="saveInstaBtn"
-              style="margin-left:5px; padding:6px 8px; border:none; background:#0f5ea8; color:white; border-radius:6px; cursor:pointer;">
-        💾
-      </button>
-    </div>
 
     <!-- Селектор темы (оставляю как у тебя) -->
     <div class="theme-row" style="margin-top:10px;">
@@ -94,7 +98,12 @@
       <button class="btn" id="friendsBtn">Мои знакомства</button>
       <button class="btn" id="giftBtn">Угостить 🍺</button>
       <a class="btn" href="/quiz" style="text-decoration:none; display:inline-block; text-align:center;">Пройти тест</a>
-    </div>
+      <div style="margin-top:12px;">
+  <button class="btn" id="editBtn">✏️ Редактировать анкету</button>
+  <button class="btn" id="fillInChatBtn" style="margin-left:8px; display:none;">
+    Заполнить в чате
+  </button>
+</div>
 
     <!-- Fallback-кнопка: покажется только если мини-апп открыли не из бота -->
     <button id="openFromBotBtn"

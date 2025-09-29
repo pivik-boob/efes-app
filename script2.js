@@ -34,6 +34,26 @@ const saveInstaBtn = document.getElementById('saveInstaBtn');
 
 const themeSel = document.getElementById('themeSel');
 
+const editBlock = document.getElementById('editBlock');
+const editBtn = document.getElementById('editBtn');
+const cancelEditBtn = document.getElementById('cancelEditBtn');
+const fillInChatBtn = document.getElementById('fillInChatBtn');
+
+function showEdit(on) {
+  if (!editBlock) return;
+  editBlock.hidden = !on;
+}
+
+function openBotChat() {
+  // имя бота берём из window.__BOT_USERNAME__ (оно уже задано в index.html)
+  const uname = window.__BOT_USERNAME__ || '';
+  if (tg?.openTelegramLink && uname) {
+    tg.openTelegramLink(`https://t.me/${uname}`);
+  } else {
+    // запасной вариант — просто ссылка
+    window.open(`https://t.me/${uname}`, '_blank');
+  }
+}
 // utils
 async function postJSON(url, body) {
   const auth = tg?.initData || '';
@@ -60,16 +80,30 @@ async function getJSON(url) {
 async function loadProfile() {
   try {
     const data = await getJSON('/api/profile/me');
+
+    // скрываем редактор по умолчанию
+    showEdit(false);
+
     if (data?.profile) {
+      // профиль есть → заполняем отображение и прячем «Заполнить в чате»
       usernameEl.textContent = data.profile.name;
       scoreEl.textContent = data.profile.score || 0;
-      profileForm.style.display = 'none';
 
-      if (!data.profile.design) {
+      if (fillInChatBtn) fillInChatBtn.style.display = 'none';
+
+      // Если хочешь сразу подставлять значения в форму при редактировании:
+      if (nameInput)   nameInput.value   = data.profile.name || '';
+      if (ageInput)    ageInput.value    = data.profile.age  || '';
+      if (moodInput)   moodInput.value   = data.profile.mood || '';
+      if (contactInput)contactInput.value= data.profile.contact || '';
+
+      // Если дизайн ещё не выбран — покажем секцию выбора
+      if (!data.profile.design && designSection) {
         designSection.style.display = 'block';
       }
     } else {
-      profileForm.style.display = 'block';
+      // профиля нет → ничего не показываем, предлагаем заполнить в чате
+      if (fillInChatBtn) fillInChatBtn.style.display = 'inline-block';
     }
   } catch (e) {
     console.error(e);
@@ -88,7 +122,7 @@ if (saveProfileBtn) {
     };
     const r = await postJSON('/api/profile/save', body);
     if (r.ok) {
-      profileForm.style.display = 'none';
+      showEdit(false);
       await loadProfile();
     } else {
       alert('Ошибка при сохранении анкеты');
@@ -208,4 +242,21 @@ if (themeSel) {
   themeSel.onchange = () => {
     document.documentElement.setAttribute('data-theme', themeSel.value);
   };
+}
+if (editBtn) {
+  editBtn.onclick = () => {
+    // Если профиля ещё нет — отправим в чат
+    if (fillInChatBtn && fillInChatBtn.style.display !== 'none') {
+      return openBotChat();
+    }
+    showEdit(true);
+  };
+}
+
+if (cancelEditBtn) {
+  cancelEditBtn.onclick = () => showEdit(false);
+}
+
+if (fillInChatBtn) {
+  fillInChatBtn.onclick = () => openBotChat();
 }
