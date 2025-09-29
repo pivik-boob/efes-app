@@ -364,8 +364,11 @@ app.post('/api/gift/redeem', express.urlencoded({ extended: true }), async (req,
 
 // ---------- Telegraf webhook (бот остаётся на вебхуке, как просила) ----------
 async function initBot() {
+  // 1) читаем ENV и логируем старт
   const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
   const PUBLIC_URL = process.env.PUBLIC_URL;
+
+  console.log('Bot: initBot() start');
 
   if (!BOT_TOKEN)  { console.log('Bot: DISABLED (no TELEGRAM_BOT_TOKEN)'); return; }
   if (!PUBLIC_URL) { console.log('Bot: PUBLIC_URL is empty — webhook cannot be set'); return; }
@@ -373,43 +376,43 @@ async function initBot() {
   const { Telegraf } = require('telegraf');
   const crypto = require('crypto');
 
+  // 2) инициализация
   const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 9000 });
 
-  // ====== Чат-анкета (in-memory state) ======
+  // 3) очистить старые /команды (чтобы меню в TG было пустым)
+  await bot.telegram.setMyCommands([]);
+
+  // 4) чат-анкета (память в ОЗУ)
   const userStates = new Map(); // userId -> { step, draft:{} }
 
   bot.start(async (ctx) => {
-    // если профиль уже есть — показываем клавиатуру и мини-апп
+    // если у юзера уже есть профиль — сразу даём кнопку открыть мини-апп
     try {
       const uid = String(ctx.from.id);
       const profile = await prisma.profile.findUnique({ where: { userId: uid } });
       if (profile) {
         const cardUrl = `${PUBLIC_URL}/`;
-        const quizUrl = `${PUBLIC_URL}/quiz`;
         await ctx.reply('Привет! 👋 Открой мини-апп:', {
           reply_markup: {
-            keyboard: [[
-              { text: 'Открыть бутылочку',  web_app: { url: cardUrl } },
-              { text: 'Какая ты бутылочка?', web_app: { url: quizUrl } }
-            ]],
+            keyboard: [[ { text: 'Открыть бутылочку', web_app: { url: cardUrl } }]],
             resize_keyboard: true,
             is_persistent: true
           }
         });
         return;
       }
-    } catch(e) {
+    } catch (e) {
       console.error('profile check on /start:', e);
     }
 
     // профиля нет — запускаем диалог
     userStates.set(ctx.from.id, { step: 'name', draft: {} });
-    await ctx.reply('Привет! Давай заполним мини-анкету. Как тебя зовут?');
+    await ctx.reply('Привет! Заполним мини-анкету. Как тебя зовут?');
   });
 
   bot.on('text', async (ctx) => {
     const st = userStates.get(ctx.from.id);
-    if (!st) return; // не в режиме анкеты
+    if (!st) return;
 
     const text = (ctx.message.text || '').trim();
     const uid  = String(ctx.from.id);
@@ -417,14 +420,13 @@ async function initBot() {
     if (st.step === 'name') {
       st.draft.name = text.slice(0,120);
       st.step = 'age';
-      return ctx.reply('Супер! Сколько тебе лет? (число 16–120)');
+      return ctx.reply('Супер! Сколько тебе лет? ');
     }
 
     if (st.step === 'age') {
       const n = Number(text);
-      if (!Number.isInteger(n) || n < 16 || n > 120) {
-        return ctx.reply('Введи число от 16 до 120 🙂');
-      }
+      if (!Number.isInteger(n) || n < 21 || n > 120)
+        return ctx.reply('Введи число от 21 до 120 🙂');
       st.draft.age = n;
       st.step = 'mood';
       return ctx.reply('Какое у тебя настроение? (коротко)');
@@ -444,18 +446,11 @@ async function initBot() {
           create: { userId: uid, name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact, design: 'classic' },
           update: { name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact }
         });
-
         userStates.delete(ctx.from.id);
 
         const cardUrl = `${PUBLIC_URL}/`;
-        const quizUrl = `${PUBLIC_URL}/quiz`;
         await ctx.reply('Готово! Открывай мини-приложение 👇', {
-          reply_markup: {
-            inline_keyboard: [[
-              { text: 'Открыть бутылочку',  web_app: { url: cardUrl } },
-              { text: 'Какая ты бутылочка?', web_app: { url: quizUrl } }
-            ]]
-          }
+          reply_markup: { inline_keyboard: [[ { text: 'Открыть бутылочку', web_app: { url: cardUrl } } ]] }
         });
       } catch (e) {
         console.error('save profile from chat:', e);
@@ -465,7 +460,7 @@ async function initBot() {
     }
   });
 
-  // ---- вебхук ----
+  // 5) включаем вебхук
   const webhookPath =
     process.env.TG_WEBHOOK_PATH ||
     ('/tg/webhook/' + crypto.createHash('sha256').update(BOT_TOKEN).digest('hex').slice(0, 32));
