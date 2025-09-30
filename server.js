@@ -367,7 +367,59 @@ async function initBot() {
   const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 9000 });
 
   // 3) очистить старые /команды (по твоей логике меню менялось само)
-  await bot.telegram.setMyCommands([]);
+// === КОМАНДЫ и КНОПКИ ===
+const webAppUrl = PUBLIC_URL || '';
+
+// 1) Команды бота (отображаются в "Меню" ⋮)
+await bot.telegram.setMyCommands([
+  { command: 'start', description: 'Запустить' },
+  { command: 'card',  description: 'Открыть клубную карту' },
+  { command: 'help',  description: 'Помощь' }
+]);
+
+// 2) Глобальная кнопка в системном меню Telegram (кнопка «Меню» → сразу WebApp)
+await bot.telegram.setChatMenuButton({
+  menu_button: {
+    type: 'web_app',
+    text: '🍺 Открыть клубную карту',
+    web_app: { url: `${webAppUrl}/` }
+  }
+});
+
+// 3) Поведение при /start — высылаем ПЕРСИСТЕНТНУЮ клавиатуру с 2 кнопками
+bot.start(async (ctx) => {
+  await ctx.reply(
+    'Добро пожаловать в Efes Club! 👇',
+    {
+      reply_markup: {
+        keyboard: [
+          [{ text: '▶️ Старт' }],
+          [{ text: '🍺 Открыть клубную карту', web_app: { url: `${webAppUrl}/` } }]
+        ],
+        resize_keyboard: true,
+        is_persistent: true
+      }
+    }
+  );
+});
+
+// 4) Обработчик на текст «Старт» — можно повторно выслать клавиатуру
+bot.hears(/^(\▶️?\s*Старт|start)$/i, async (ctx) => {
+  await ctx.reply('Готово! Карта ниже 👇', {
+    reply_markup: {
+      inline_keyboard: [[{ text: '🍺 Открыть клубную карту', web_app: { url: `${webAppUrl}/` } }]]
+    }
+  });
+});
+
+// 5) Команда /card — дублирует кнопку
+bot.command('card', async (ctx) => {
+  await ctx.reply('Открыть клубную карту:', {
+    reply_markup: {
+      inline_keyboard: [[{ text: '🍺 Открыть', web_app: { url: `${webAppUrl}/` } }]]
+    }
+  });
+});
 
   // 4) чат-анкета (память в ОЗУ)
   const userStates = new Map(); // userId -> { step, draft:{} }
