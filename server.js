@@ -14,20 +14,6 @@ app.use(express.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 10000;
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // e.g. https://efes-app.onrender.com
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-
-// CORS (микро)
-app.use((req, res, next) => {
-  if (!ALLOWED_ORIGINS.length) return next();
-  const o = req.headers.origin;
-  if (o && ALLOWED_ORIGINS.includes(o)) {
-    res.setHeader('Access-Control-Allow-Origin', o);
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  }
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
-  next();
-});
 
 // ---------- Prisma ----------
 const prisma = new PrismaClient();
@@ -84,7 +70,7 @@ function verifyInitData(initDataRaw) {
   }
 }
 
-// Миддлварь: достаём userId из Authorization (там лежит tg.initData)
+// ---------- Auth middleware ----------
 function authMiddleware(req, res, next) {
   const initDataRaw = req.headers['authorization'] || req.body?.tgInitData || '';
   const v = verifyInitData(initDataRaw);
@@ -139,9 +125,10 @@ app.post('/api/profile/save', authMiddleware, async (req, res) => {
 
     const p = await prisma.profile.upsert({
       where: { userId },
-      create: { userId, name: dataUpdate.name || 'Гость', age: dataUpdate.age || 18, mood: dataUpdate.mood || '', contact: dataUpdate.contact || '' },
+      create: { userId, name: dataUpdate.name || 'Гость', age: dataUpdate.age || 18, mood: dataUpdate.mood || '', contact: dataUpdate.contact || '', design: 'classic' },
       update: dataUpdate,
     });
+
     res.json({ ok: true, profile: p });
   } catch (e) {
     console.error(e);
@@ -215,11 +202,31 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
     if (other && Math.abs(now - other.ts) <= MATCH_WINDOW_MS && other.userId !== userId) {
       // нашли пару → фиксируем знакомство в БД
       const partnerId = other.userId;
-      await prisma.meeting.create({
-        data: { aId: userId, bId: partnerId, createdAt: new Date() }
+
+      // one-per-day rule (пара только раз в сутки)
+      const start = new Date(); start.setHours(0,0,0,0);
+      const end = new Date();   end.setHours(23,59,59,999);
+
+      const already = await prisma.meeting.findFirst({
+        where: {
+          createdAt: { gte: start, lte: end },
+          OR: [
+            { aId: userId, bId: partnerId },
+            { aId: partnerId, bId: userId },
+          ]
+        }
+      });
+      if (already) return res.json({ status: 'already_today' });
+
+      const meeting = await prisma.meeting.create({
+        data: { aId: userId, bId: partnerId }
       });
 
+      // очки обоим +1
+      await prisma.profile.update({ where: { userId }, data: { score: (self.score || 0) + 1 } });
       const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
+      if (partner) await prisma.profile.update({ where: { userId: partnerId }, data: { score: (partner.score || 0) + 1 } });
+
       return res.json({
         status: 'matched',
         other: { id: partnerId, name: partner?.name || 'Гость', contact: partner?.contact || '' }
@@ -259,14 +266,14 @@ app.get('/api/friends/today', authMiddleware, async (req, res) => {
       const p = await prisma.profile.findUnique({ where: { userId: otherId } });
       items.push({ user_id: otherId, profile: p, at: m.createdAt });
     }
-    res.json({ ok: true, list: items });
+    res.json({ ok: true, items });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false });
   }
 });
 
-// ---------- API: History (simple) ----------
+// ---------- API: History ----------
 app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -289,39 +296,18 @@ app.get('/api/history', authMiddleware, async (req, res) => {
 });
 
 // ---------- API: Gifts ----------
-function genVoucher() {
-  // EFES-XXXX-XXXX
-  const a = crypto.randomBytes(2).toString('hex').toUpperCase();
-  const b = crypto.randomBytes(2).toString('hex').toUpperCase();
-  return `EFES-${a}-${b}`;
-}
-
 app.post('/api/gift/create', authMiddleware, async (req, res) => {
   try {
-    const from = req.userId;
-    const { to = '', message = '' } = req.body || {};
-    const voucher = genVoucher();
-
-    const g = await prisma.giftCode.create({
-      data: {
-        code: voucher,
-        fromUserId: from,
-        toUserId: to ? String(to) : null,
-        message: String(message || ''),
-        status: 'NEW',
-        createdAt: new Date()
-      }
-    });
-
-    const targetUrl = PUBLIC_URL ? `${PUBLIC_URL}/gift/${encodeURIComponent(voucher)}` : '';
-    res.json({ ok: true, voucher, targetUrl });
+    const { message } = req.body || {};
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await prisma.giftCode.create({ data: { code, status: 'NEW', message: message || null } });
+    res.json({ ok: true, code, link: `${PUBLIC_URL}/gift/${code}` });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false });
   }
 });
 
-// простая страница проверки подарка
 app.get('/gift/:code', async (req, res) => {
   try {
     const code = req.params.code;
@@ -338,8 +324,10 @@ app.get('/gift/:code', async (req, res) => {
         ${!redeemed ? `<form method="POST" action="/api/gift/redeem">
           <input type="hidden" name="code" value="${code}">
           <button type="submit" style="padding:10px 16px">Погасить</button>
-        </form>` : '<p>Код уже использован.</p>'}
-      </body></html>`;
+        </form>` : ''}
+      </body></html>
+    `;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (e) {
     console.error(e);
@@ -362,7 +350,7 @@ app.post('/api/gift/redeem', express.urlencoded({ extended: true }), async (req,
   }
 });
 
-// ---------- Telegraf webhook (бот остаётся на вебхуке, как просила) ----------
+// ---------- Bot (Telegraf webhook) ----------
 async function initBot() {
   // 1) читаем ENV и логируем старт
   const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
@@ -374,12 +362,11 @@ async function initBot() {
   if (!PUBLIC_URL) { console.log('Bot: PUBLIC_URL is empty — webhook cannot be set'); return; }
 
   const { Telegraf } = require('telegraf');
-  const crypto = require('crypto');
 
   // 2) инициализация
   const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 9000 });
 
-  // 3) очистить старые /команды (чтобы меню в TG было пустым)
+  // 3) очистить старые /команды (по твоей логике меню менялось само)
   await bot.telegram.setMyCommands([]);
 
   // 4) чат-анкета (память в ОЗУ)
@@ -475,4 +462,7 @@ async function initBot() {
 app.listen(PORT, () => {
   console.log(`Efes app listening on :${PORT}`);
   if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
+
+  // IMPORTANT: start bot + set webhook on boot
+  initBot().catch(err => console.error('Bot init failed:', err));
 });
