@@ -1,3 +1,12 @@
+/* === Пиксельный шрифт === */
+@font-face{
+  font-family:'EpilepsySans';
+  src:url('fonts/Epilepsy Sans.ttf') format('truetype');
+  font-weight:normal;
+  font-style:normal;
+}
+/* Применяем шрифт как базовый */
+body { font-family:'EpilepsySans', Arial, sans-serif; }
 :root {
   --efes-blue:#0f4c81;
   --efes-blue-dark:#002244;
@@ -117,3 +126,44 @@ body {
 }
 :root[data-theme="dark"] #historyBox h3 { color: var(--efes-gold-bright); border-color: var(--efes-gold); }
 :root[data-theme="dark"] #historyList li { border-color: rgba(255,215,0,.45); }
+/* === 4 темы фона === */
+.theme-efes   { background: url("img/ефес.jpg") no-repeat center center / cover; }
+.theme-miller { background: url("img/миллер.jpg") no-repeat center center / cover; }
+.theme-ruzka  { background: url("img/ружка свежего.jpg") no-repeat center center / cover; }
+.theme-medved { background: url("img/медведь.jpg") no-repeat center center / cover; }
+
+/* Карточка поверх фото-фона */
+.card{
+  background: rgba(15, 30, 60, 0.92);
+  border: 2px solid var(--efes-gold);
+  color:#fff;
+  box-shadow: 0 0 24px rgba(0,0,0,.6);
+}
+.card h1{
+  color: var(--efes-gold-bright);
+  text-shadow: 0 0 8px rgba(0,0,0,.7);
+}
+.card h2, .card p { color:#fff; }
+
+/* Бутылка: пусть пиксельно рендерится и анимации из твоего файла работают */
+.bottle-wrap{ position:relative; }
+.bottle-img{ image-rendering: pixelated; }
+
+/* Доп. слои для эффектов (если захочешь «крышку»/«пену») */
+.cap, .foam{
+  position:absolute; left:50%; transform:translateX(-50%);
+  pointer-events:none; opacity:0;
+}
+.cap{
+  top:8px; width:26px; height:10px;
+  background:#c9a66b; border:2px solid #4b3b20; border-radius:2px;
+}
+.foam{
+  top:-6px; width:78px; height:46px;
+  background:radial-gradient(#fff, rgba(255,255,255,.85));
+  border-radius:20px 20px 14px 14px;
+}
+
+/* Анимации «крышки» и «пены» (под твои keyframes) */
+.cap.pop  { animation: popCap .5s ease forwards; }
+.foam.spray{ animation: foamSpray .9s ease forwards; }

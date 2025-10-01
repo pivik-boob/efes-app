@@ -1,262 +1,365 @@
+// ===== Telegram Mini App bootstrap =====
 const tg = window.Telegram?.WebApp;
 if (tg) tg.ready();
 
-const API = window.__API_BASE__ || '';
-const BOT = window.__BOT_USERNAME__ || '';
+const API = window.__API_BASE__ || "";
+const BOT = window.__BOT_USERNAME__ || "";
 
-// elements
-const usernameEl = document.getElementById('username');
-const scoreEl = document.getElementById('score');
-const statusEl = document.getElementById('status');
-const partnerEl = document.getElementById('partner');
-const bottleEl = document.getElementById('bottle');
-const capEl = document.getElementById('cap');
-const foamEl = document.getElementById('foam');
-
-const profileForm = document.getElementById('profileForm');
-const nameInput = document.getElementById('nameInput');
-const ageInput = document.getElementById('ageInput');
-const moodInput = document.getElementById('moodInput');
-const contactInput = document.getElementById('contactInput');
-const saveProfileBtn = document.getElementById('saveProfileBtn');
-
-const designSection = document.getElementById('designSection');
-const designOptions = document.querySelectorAll('.design-card');
-const saveDesignBtn = document.getElementById('saveDesignBtn');
-
-const shakeBtn = document.getElementById('shakeBtn');
-const historyList = document.getElementById('historyList');
-const friendsBtn = document.getElementById('friendsBtn');
-const giftBtn = document.getElementById('giftBtn');
-
-const instaInput = document.getElementById('instaInput');
-const saveInstaBtn = document.getElementById('saveInstaBtn');
-
-const themeSel = document.getElementById('themeSel');
-
-const editBlock = document.getElementById('editBlock');
-const editBtn = document.getElementById('editBtn');
-const cancelEditBtn = document.getElementById('cancelEditBtn');
-const fillInChatBtn = document.getElementById('fillInChatBtn');
-
-function showEdit(on) {
-  if (!editBlock) return;
-  editBlock.hidden = !on;
-}
-
-function openBotChat() {
-  // имя бота берём из window.__BOT_USERNAME__ (оно уже задано в index.html)
-  const uname = window.__BOT_USERNAME__ || '';
-  if (tg?.openTelegramLink && uname) {
-    tg.openTelegramLink(`https://t.me/${uname}`);
-  } else {
-    // запасной вариант — просто ссылка
-    window.open(`https://t.me/${uname}`, '_blank');
+// ===== Helpers: selectors (поддержка старых и новых ID) =====
+function q(...ids) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) return el;
   }
+  return null;
 }
-// utils
+function on(el, ev, fn) { if (el) el.addEventListener(ev, fn); }
+function setText(el, txt) { if (el) el.textContent = txt; }
+
+// UI (оба набора ID, где известно)
+const usernameEl  = q("username", "userName", "headerUsername");
+const statusEl    = q("status", "stateText");
+const partnerEl   = q("partner", "matchPartner");
+const historyEl   = q("historyList", "history", "listHistory");
+const shakeBtn    = q("shakeBtn", "btnShake", "btnCheers");
+
+const editBlock   = q("editBlock", "profileEditBlock");
+const editBtn     = q("editBtn", "btnEdit");
+const cancelEdit  = q("cancelEditBtn", "btnCancelEdit");
+const fillInChat  = q("fillInChatBtn", "btnFillInChat");
+
+// профиль (анкета)
+const formProfile = q("profileForm", "frmProfile");
+const inpName     = q("inpName", "name", "inputName");
+const inp21Yes    = q("inp21Yes", "age21yes");
+const inp21No     = q("inp21No", "age21no");
+const inpMood     = q("inpMood", "mood");
+const inpDesign   = q("inpDesign", "designSelect");
+
+// кнопки из твоего плана
+const btnFriends  = q("friendsBtn", "btnFriends", "openFriends");
+const btnGift     = q("giftBtn", "btnGift", "openGift");
+const btnTheme    = q("themeBtn", "btnTheme", "openTheme");
+
+// анимации (если есть)
+const bottleEl = q("bottle");
+const capEl    = q("cap");
+const foamEl   = q("foam");
+
+// ===== Fetch helpers =====
+async function getJSON(url) {
+  const auth = tg?.initData || "";
+  const r = await fetch(API + url, { headers: { "Authorization": auth } });
+  return r.json();
+}
 async function postJSON(url, body) {
-  const auth = tg?.initData || '';
-  const res = await fetch(API + url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': auth
-    },
+  const auth = tg?.initData || "";
+  const r = await fetch(API + url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": auth },
     body: JSON.stringify(body || {})
   });
-  return res.json();
+  return r.json();
 }
 
-async function getJSON(url) {
-  const auth = tg?.initData || '';
-  const res = await fetch(API + url, {
-    headers: { 'Authorization': auth }
-  });
-  return res.json();
+// ===== Shims (оба API варианта) =====
+async function saveProfile(data) {
+  // 1) новый эндпоинт
+  try {
+    const r = await postJSON("/api/profile/update", data);
+    if (r?.ok || r?.profile) return r;
+  } catch {}
+  // 2) старый эндпоинт
+  try {
+    const payload = {
+      name: data.name,
+      age: data.age21 === true ? 21 : (data.age21 === false ? 18 : undefined),
+      mood: data.mood,
+      contact: undefined // instagram не трогаем — анкета сама спросит в боте
+    };
+    const r = await postJSON("/api/profile/save", payload);
+    if (r?.ok || r?.profile) return r;
+  } catch {}
+  return { ok: false };
 }
 
-// load profile
+async function saveDesign(design) {
+  // 1) новый
+  try {
+    const r = await postJSON("/api/profile/design", { design });
+    if (r?.ok || r?.profile) return r;
+  } catch {}
+  // 2) старый
+  try {
+    const r = await postJSON("/api/save_design", { design });
+    if (r?.ok || r?.profile) return r;
+  } catch {}
+  return { ok: false };
+}
+
+// ===== Status helpers =====
+function setStatus(txt) { setText(statusEl, txt || ""); }
+function showEdit(on) { if (editBlock) editBlock.hidden = !on; }
+function openBot() { if (BOT) window.location.href = `https://t.me/${BOT}`; }
+
+// ===== Username из initData (без анкеты) =====
+(function showInitUsername() {
+  const u = tg?.initDataUnsafe?.user || null;
+  if (!u) return;
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  if (u.username) {
+    setText(usernameEl, full ? `${full} (@${u.username})` : `@${u.username}`);
+  } else if (full && !usernameEl?.textContent) {
+    setText(usernameEl, full);
+  }
+})();
+
+// ===== Профиль/История =====
 async function loadProfile() {
   try {
-    const data = await getJSON('/api/profile/me');
-
-    // скрываем редактор по умолчанию
-    showEdit(false);
-
-    if (data?.profile) {
-      // профиль есть → заполняем отображение и прячем «Заполнить в чате»
-      usernameEl.textContent = data.profile.name;
-      scoreEl.textContent = data.profile.score || 0;
-
-      if (fillInChatBtn) fillInChatBtn.style.display = 'none';
-
-      // Если хочешь сразу подставлять значения в форму при редактировании:
-      if (nameInput)   nameInput.value   = data.profile.name || '';
-      if (ageInput)    ageInput.value    = data.profile.age  || '';
-      if (moodInput)   moodInput.value   = data.profile.mood || '';
-      if (contactInput)contactInput.value= data.profile.contact || '';
-
-      // Если дизайн ещё не выбран — покажем секцию выбора
-      if (!data.profile.design && designSection) {
-        designSection.style.display = 'block';
-      }
-    } else {
-      // профиля нет → ничего не показываем, предлагаем заполнить в чате
-      if (fillInChatBtn) fillInChatBtn.style.display = 'inline-block';
+    const r = await getJSON("/api/profile/me");
+    const p = r?.profile;
+    if (!p) {
+      if (fillInChat) fillInChat.style.display = "";
+      return;
     }
-  } catch (e) {
-    console.error(e);
-  }
+    if (fillInChat) fillInChat.style.display = "none";
+    // если у пользователя нет tg username — покажем имя из профиля
+    if (!(tg?.initDataUnsafe?.user?.username)) {
+      setText(usernameEl, p.name || "Гость");
+    }
+    // заполнить форму (если есть поля)
+    if (inpName && !inpName.value) inpName.value = p.name || "";
+    if (typeof p.age21 === "boolean") {
+      if (p.age21 && inp21Yes) inp21Yes.checked = true;
+      if (!p.age21 && inp21No) inp21No.checked = true;
+    }
+    if (inpMood && !inpMood.value)   inpMood.value = p.mood || "🙂";
+    if (inpDesign && !inpDesign.value) inpDesign.value = p.design || "classic";
+  } catch {}
 }
-loadProfile();
 
-// save profile
-if (saveProfileBtn) {
-  saveProfileBtn.onclick = async () => {
-    const body = {
-      name: nameInput.value,
-      age: parseInt(ageInput.value),
-      mood: moodInput.value,
-      contact: contactInput.value
+async function loadHistory() {
+  try {
+    const r = await getJSON("/api/history");
+    const hist = r?.history || [];
+    if (!historyEl) return;
+    historyEl.innerHTML = "";
+    hist.forEach(h => {
+      const li = document.createElement("li");
+      const uname = h.withUsername ? ` (@${h.withUsername})` : "";
+      const when = h.at ? ` — ${new Date(h.at).toLocaleString()}` : "";
+      li.textContent = `${h.withName}${uname}${when}`;
+      historyEl.appendChild(li);
+    });
+  } catch {}
+}
+
+// ===== Анкета (инстаграм не трогаем) =====
+if (formProfile) {
+  on(formProfile, "submit", async (e) => {
+    e.preventDefault();
+    const payload = {
+      name: (inpName?.value || "").trim(),
+      age21: inp21Yes?.checked ? true : (inp21No?.checked ? false : undefined),
+      mood: (inpMood?.value || "").trim(),
+      design: (inpDesign?.value || "").trim()
     };
-    const r = await postJSON('/api/profile/save', body);
-    if (r.ok) {
+    const r = await saveProfile(payload);
+    if (r?.ok || r?.profile) {
       showEdit(false);
       await loadProfile();
+      setStatus("Анкета обновлена ✅");
     } else {
-      alert('Ошибка при сохранении анкеты');
-    }
-  };
-}
-
-// design
-let selectedDesign = null;
-designOptions.forEach(el => {
-  el.onclick = () => {
-    designOptions.forEach(c => c.classList.remove('selected'));
-    el.classList.add('selected');
-    selectedDesign = el.dataset.design;
-  };
-});
-if (saveDesignBtn) {
-  saveDesignBtn.onclick = async () => {
-    if (!selectedDesign) return alert('Выбери дизайн');
-    const r = await postJSON('/api/save_design', { design: selectedDesign });
-    if (r.ok) {
-      designSection.style.display = 'none';
-      await loadProfile();
-    }
-  };
-}
-
-// shake
-let shaking = false;
-let shakeTimeout;
-function triggerAnimation() {
-  bottleEl.classList.add('growshake');
-  capEl.classList.add('pop');
-  foamEl.classList.add('spray');
-  setTimeout(() => {
-    bottleEl.classList.remove('growshake');
-    capEl.classList.remove('pop');
-    foamEl.classList.remove('spray');
-  }, 1200);
-}
-if (shakeBtn) {
-  shakeBtn.onclick = () => {
-    statusEl.textContent = 'Встряхни!';
-    shaking = true;
-    if (shakeTimeout) clearTimeout(shakeTimeout);
-    shakeTimeout = setTimeout(() => {
-      shaking = false;
-      statusEl.textContent = 'Время вышло';
-    }, 10000);
-  };
-
-  window.addEventListener('devicemotion', async (ev) => {
-    if (!shaking) return;
-    const acc = ev.accelerationIncludingGravity;
-    if (acc && Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z) > 30) {
-      shaking = false;
-      triggerAnimation();
-      statusEl.textContent = 'Чокаемся...';
-      const r = await postJSON('/api/shake');
-      if (r.partner) {
-        partnerEl.textContent = 'Вы чокнулись с ' + r.partner.name;
-        scoreEl.textContent = r.score;
-        loadHistory();
-      } else {
-        partnerEl.textContent = 'Партнёр не найден';
-      }
+      setStatus("Не удалось сохранить анкету");
     }
   });
 }
+if (editBtn)     on(editBtn, "click", () => { 
+  if (fillInChat && fillInChat.style.display !== "none") return openBot();
+  showEdit(true);
+});
+if (cancelEdit)  on(cancelEdit, "click", () => showEdit(false));
+if (fillInChat)  on(fillInChat, "click", openBot);
 
-// history
-async function loadHistory() {
-  const data = await getJSON('/api/history');
-  historyList.innerHTML = '';
-  if (data?.history) {
-    data.history.forEach(h => {
-      const li = document.createElement('li');
-      li.textContent = `${h.withName} — ${new Date(h.at).toLocaleString()}`;
-      historyList.appendChild(li);
-    });
+// ===== Friends / Gift / Theme =====
+if (btnFriends) {
+  on(btnFriends, "click", async () => {
+    await loadHistory();
+    setStatus("Показана история чоков 📜");
+  });
+}
+if (btnGift) {
+  on(btnGift, "click", async () => {
+    try {
+      const r = await postJSON("/api/gift/create", {}); // твой сервер вернёт {ok, code, link}
+      if (r?.ok && r.link) {
+        setStatus("Подарочный код создан 🎁");
+        // можно показать модалку/alert, чтобы скопировать
+        alert(`Подарочный код: ${r.code}\nСсылка: ${r.link}`);
+      } else {
+        setStatus("Не удалось создать подарок");
+      }
+    } catch {
+      setStatus("Ошибка при создании подарка");
+    }
+  });
+}
+if (btnTheme) {
+  on(btnTheme, "click", async () => {
+    // === Темы (фон + картинка) ===
+const THEMES = {
+  efes:   { bgClass: 'theme-efes',   bottleSrc: 'img/ефес.jpg',          label: 'EFES' },
+  miller: { bgClass: 'theme-miller', bottleSrc: 'img/миллер.jpg',        label: 'Miller' },
+  ruzka:  { bgClass: 'theme-ruzka',  bottleSrc: 'img/ружка свежего.jpg', label: 'Кружка свежего' },
+  medved: { bgClass: 'theme-medved', bottleSrc: 'img/медведь.jpg',       label: 'Белый медведь' },
+};
+
+function setTheme(name) {
+  const cfg = THEMES[name] || THEMES.efes;
+  document.body.className = cfg.bgClass;
+  const bottle = document.getElementById('bottle');
+  if (bottle) bottle.src = cfg.bottleSrc;
+  try { localStorage.setItem('efes_theme', name); } catch(_) {}
+}
+
+function initThemesUI() {
+  const sel = document.getElementById('themeSel');
+  if (!sel) return;
+  let saved = null;
+  try { saved = localStorage.getItem('efes_theme'); } catch(_) {}
+  setTheme(saved || 'efes');
+  sel.value = saved || 'efes';
+  sel.addEventListener('change', e => setTheme(e.target.value));
+}
+  });
+}
+
+// === Анимация бутылки ===
+window.shakeBottle = function(){
+  const bottle = document.getElementById('bottle');
+  const cap    = document.getElementById('cap');
+  const foam   = document.getElementById('foam');
+
+  [bottle, cap, foam].forEach(el=>{
+    if(!el) return;
+    el.classList.remove('growshake','pop','spray');
+    void el.offsetWidth; // reset
+  });
+
+  bottle?.classList.add('growshake');
+  cap?.classList.add('pop');
+  foam?.classList.add('spray');
+
+  document.getElementById('sfx-bottle')?.play?.();
+};
+
+// ===== iOS motion permission =====
+async function ensureMotionPermission() {
+  try {
+    // @ts-ignore
+    if (typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function") {
+      const st = await DeviceMotionEvent.requestPermission();
+      return st === "granted";
+    }
+    return true;
+  } catch { return false; }
+}
+
+// ===== Shake detection (улучшённая) =====
+let listening = false;
+let listenTimer = null;
+let lastHistoryTs = 0;
+
+function mag(acc) {
+  if (!acc) return 0;
+  return Math.abs(acc.x||0) + Math.abs(acc.y||0) + Math.abs(acc.z||0);
+}
+async function snapshotHistory() {
+  const d = await getJSON("/api/history");
+  const last = (d?.history || [])[0];
+  lastHistoryTs = last ? new Date(last.at).getTime() : 0;
+}
+async function waitPartner(deadline) {
+  setStatus("Ищу партнёра рядом…");
+  while (Date.now() < deadline) {
+    const d = await getJSON("/api/history");
+    const last = (d?.history || [])[0];
+    if (last) {
+      const ts = new Date(last.at).getTime();
+      if (!lastHistoryTs || ts > lastHistoryTs) {
+        setText(partnerEl, `Вы чокнулись с ${last.withName}${last.withUsername ? ` (@${last.withUsername})` : ""}`);
+        await loadProfile();
+        await loadHistory();
+        setStatus("Готов к чок 🥂");
+        return true;
+      }
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;
+}
+
+async function onShake() {
+  listening = false;
+  anim();
+  setStatus("Чокаемся…");
+
+  await snapshotHistory();
+
+  const r = await postJSON("/api/shake", {});
+  // поддержка "старого" ответа (partner/score), и "нового" (other, already_today, waiting)
+  if (r?.status === "matched" && r.other) {
+    setText(partnerEl, `Вы чокнулись с ${r.other.name}${r.other.username ? ` (@${r.other.username})` : ""}`);
+    await loadProfile();
+    await loadHistory();
+    setStatus("Готов к чок 🥂");
+    return;
+  }
+  if (r?.partner) { // старый формат
+    setText(partnerEl, `Вы чокнулись с ${r.partner.name || "Гость"}`);
+    await loadProfile();
+    await loadHistory();
+    setStatus("Готов к чок 🥂");
+    return;
+  }
+  if (r?.status === "already_today") {
+    setStatus("С этой парой уже был чок сегодня");
+    return;
+  }
+  if (r?.status === "need_profile") {
+    setStatus("Заполни анкету (нужно подтвердить 21+)");
+    return;
+  }
+  // waiting → ждём второго до 12 сек
+  const ok = await waitPartner(Date.now() + 12000);
+  if (!ok) {
+    setText(partnerEl, "");
+    setStatus("Никого рядом. Попробуй ещё раз");
   }
 }
+
+async function startListen() {
+  const ok = await ensureMotionPermission();
+  if (!ok) { setStatus("Разреши доступ к датчикам движения"); return; }
+  setStatus("Встряхни!");
+  listening = true;
+  clearTimeout(listenTimer);
+  listenTimer = setTimeout(() => {
+    listening = false;
+    setStatus("Время вышло");
+  }, 12000);
+}
+
+window.addEventListener("devicemotion", (ev) => {
+  if (!listening) return;
+  if (mag(ev.accelerationIncludingGravity) > 30) onShake();
+}, { passive: true });
+
+if (shakeBtn) on(shakeBtn, "click", startListen);
+
+// ===== первичная загрузка =====
+loadProfile();
 loadHistory();
-
-// insta
-if (saveInstaBtn) {
-  saveInstaBtn.onclick = async () => {
-    const r = await postJSON('/api/profile/save', { insta: instaInput.value });
-    if (r.ok) alert('Сохранено!');
-  };
-}
-
-// friends
-if (friendsBtn) {
-  friendsBtn.onclick = async () => {
-    const d = await getJSON('/api/friends/today');
-    alert(JSON.stringify(d.friends || []));
-  };
-}
-
-// gift
-if (giftBtn) {
-  giftBtn.onclick = async () => {
-    const d = await postJSON('/api/gift/create');
-    if (d?.code) {
-      alert('Твой код: ' + d.code);
-    }
-  };
-}
-
-// theme select
-if (themeSel) {
-  themeSel.innerHTML = `
-    <option value="light">Светлая</option>
-    <option value="dark">Тёмная</option>
-  `;
-  themeSel.onchange = () => {
-    document.documentElement.setAttribute('data-theme', themeSel.value);
-  };
-}
-if (editBtn) {
-  editBtn.onclick = () => {
-    // Если профиля ещё нет — отправим в чат
-    if (fillInChatBtn && fillInChatBtn.style.display !== 'none') {
-      return openBotChat();
-    }
-    showEdit(true);
-  };
-}
-
-if (cancelEditBtn) {
-  cancelEditBtn.onclick = () => showEdit(false);
-}
-
-if (fillInChatBtn) {
-  fillInChatBtn.onclick = () => openBotChat();
-}
+setStatus("Готов к чок 🥂");
