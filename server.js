@@ -19,6 +19,17 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'efes_secret';
 // ---------- Prisma ----------
 const prisma = new PrismaClient();
 
+// ---------- Helpers: sync Telegram username (no auto-create) ----------
+async function syncTgUsername(userId, tgUser) {
+  try {
+    const uname = tgUser?.username || null;
+    const p = await prisma.profile.findUnique({ where: { userId } });
+    if (p && p.tgUsername !== uname) {
+      await prisma.profile.update({ where: { userId }, data: { tgUsername: uname } });
+    }
+  } catch (_) {}
+}
+
 // ---------- Optional Redis (for fast matching), with safe fallback ----------
 let redis = null;
 const memoryQueue = { waiting: null }; // fallback in-memory storage
@@ -48,30 +59,24 @@ function verifyInitData(initDataRaw) {
     const data = {};
     for (const [k, v] of url.searchParams.entries()) data[k] = v;
 
-    if (!data.hash) return { ok: false };
-
-    const hash = data.hash;
+    const receivedHash = data.hash;
+    if (!receivedHash) return { ok: false };
     delete data.hash;
 
-    const entries = Object.keys(data)
-      .sort()
-      .map(k => `${k}=${data[k]}`)
-      .join('\n');
+    const keys = Object.keys(data).sort();
+    const checkString = keys.map(k => `${k}=${data[k]}`).join('\n');
 
-    const secretKey = crypto.createHash('sha256')
-      .update(BOT_TOKEN)
-      .digest();
+    const secretKey = crypto.createHash('sha256').update(BOT_TOKEN).digest();
+    const calcHash = crypto.createHmac('sha256', secretKey).update(checkString).digest('hex');
 
-    const checkHash = crypto.createHmac('sha256', secretKey)
-      .update(entries)
-      .digest('hex');
+    if (calcHash !== receivedHash) return { ok: false };
 
-    if (hash !== checkHash) return { ok: false };
-
-    const user = data.user ? JSON.parse(data.user) : null;
+    // Достаём user.id
+    const userStr = data.user || '';
+    const user = userStr ? JSON.parse(userStr) : null;
     const userId = user?.id ? String(user.id) : null;
 
-    return { ok: true, userId, user, raw: data };
+    return { ok: true, userId, raw: data, user };
   } catch (e) {
     console.error('verifyInitData error:', e);
     return { ok: false };
@@ -89,15 +94,16 @@ function authMiddleware(req, res, next) {
 }
 
 // ---------- Static ----------
-app.use(express.static(path.join(__dirname))); // index.html, quiz.html, style.css, script2.js, etc.
+app.use(express.static(path.join(__dirname))); // index.html, style.css, script.js, etc.
 
 // ---------- Health ----------
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-// ---------- API: Profile (старый удобный эндпоинт) ----------
+// ---------- API: Profile (backward-compat + no auto-create on /me) ----------
 app.get('/api/profile', authMiddleware, async (req, res) => {
   try {
     const uid = req.query.uid || req.userId;
+    await syncTgUsername(String(uid), req.tgUser);
     const p = await prisma.profile.findUnique({ where: { userId: String(uid) } });
     if (!p) return res.json({ exists: false });
     res.json({ exists: true, profile: p });
@@ -107,13 +113,25 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
   }
 });
 
-// ---------- API: Save/Upsert profile ----------
+app.get('/api/profile/me', authMiddleware, async (req, res) => {
+  try {
+    await syncTgUsername(req.userId, req.tgUser);
+    const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
+    // ВАЖНО: не создаём автоматически — чтобы WebApp мог показать кнопку «Заполнить в чате»
+    if (!p) return res.json({ profile: null });
+    res.json({ profile: p });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false });
+  }
+});
+
+// Save/Upsert profile (поддерживает insta → contact)
 app.post('/api/profile/save', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
     const { name, age, mood, contact, insta } = req.body || {};
 
-    // если прислали только instagram — тоже сохраняем в contact
     const dataUpdate = {};
     if (name) dataUpdate.name = String(name).slice(0, 120);
     if (age) dataUpdate.age = Number(age);
@@ -122,7 +140,14 @@ app.post('/api/profile/save', authMiddleware, async (req, res) => {
 
     const p = await prisma.profile.upsert({
       where: { userId },
-      create: { userId, name: dataUpdate.name || 'Гость', age: dataUpdate.age || 21, mood: dataUpdate.mood || '', contact: dataUpdate.contact || '', design: 'classic' },
+      create: {
+        userId,
+        name: dataUpdate.name || 'Гость',
+        age: dataUpdate.age || 21,
+        mood: dataUpdate.mood || '',
+        contact: dataUpdate.contact || '',
+        design: 'classic'
+      },
       update: dataUpdate,
     });
 
@@ -133,7 +158,7 @@ app.post('/api/profile/save', authMiddleware, async (req, res) => {
   }
 });
 
-// ---------- API: set design ----------
+// Set design (совместимая точка)
 app.post('/api/profile/design', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -146,18 +171,6 @@ app.post('/api/profile/design', authMiddleware, async (req, res) => {
       update: { design },
     });
     res.json({ ok: true, profile: p });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false });
-  }
-});
-
-// удобный эндпоинт как в script2.js
-app.get('/api/profile/me', authMiddleware, async (req, res) => {
-  try {
-    const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
-    if (!p) return res.json({ profile: null });
-    res.json({ profile: p });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false });
@@ -199,11 +212,13 @@ async function popWaiting() {
   }
 }
 
+// ---------- SHAKE ----------
 app.post('/api/shake', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
     const now = Date.now();
-    // проверим профиль
+
+    await syncTgUsername(userId, req.tgUser);
     const self = await prisma.profile.findUnique({ where: { userId } });
     if (!self) return res.json({ status: 'need_profile' });
 
@@ -227,18 +242,16 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
       });
       if (already) return res.json({ status: 'already_today' });
 
-      // создаём встречу
-      await prisma.meeting.create({
-        data: { aId: userId, bId: partnerId }
-      });
+      await prisma.meeting.create({ data: { aId: userId, bId: partnerId } });
 
-      // берём профиль партнёра (чтобы отдать имя/username/контакт)
+      // возвращаем данные партнёра (имя + username), без системы баллов
       const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
 
       return res.json({
         status: 'matched',
         other: { id: partnerId, name: partner?.name || 'Гость', username: partner?.tgUsername || null, contact: partner?.contact || '' }
       });
+
     } else {
       // никого не было — встанем в очередь на MATCH_WINDOW_MS
       await setWaiting(userId, now);
@@ -278,7 +291,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
   }
 });
 
-// ---------- API: History ----------
+// ---------- HISTORY ----------
 app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -300,7 +313,7 @@ app.get('/api/history', authMiddleware, async (req, res) => {
   }
 });
 
-// ---------- Gift codes (как были) ----------
+// ---------- Gift codes ----------
 app.post('/api/gift/create', authMiddleware, async (req, res) => {
   try {
     const { message } = req.body || {};
@@ -325,6 +338,7 @@ app.get('/gift/:code', async (req, res) => {
   }
 });
 
+// совместимость: оба варианта погашения
 app.post('/gift/:code/redeem', async (req, res) => {
   try {
     const code = req.params.code;
@@ -340,50 +354,69 @@ app.post('/gift/:code/redeem', async (req, res) => {
   }
 });
 
+app.post('/api/gift/redeem', express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const code = req.body.code;
+    const g = await prisma.giftCode.findUnique({ where: { code } });
+    if (!g) return res.status(404).send('Код не найден');
+    if (g.status === 'USED') return res.send('Код уже использован.');
+
+    await prisma.giftCode.update({ where: { code }, data: { status: 'USED', usedAt: new Date() } });
+    res.send('Код успешно погашен ✅');
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Ошибка сервера');
+  }
+});
+
 // ---------- Bot (Telegraf webhook) ----------
 async function initBot() {
-  // 1) читаем ENV и логируем старт
-  const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
-  const PUBLIC_URL = process.env.PUBLIC_URL;
-
   console.log('Bot: initBot() start');
-
   if (!BOT_TOKEN)  { console.log('Bot: DISABLED (no TELEGRAM_BOT_TOKEN)'); return; }
   if (!PUBLIC_URL) { console.log('Bot: PUBLIC_URL is empty — webhook cannot be set'); return; }
 
   const { Telegraf } = require('telegraf');
-
-  // 2) инициализация
   const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 9000 });
 
-  // === КОМАНДЫ и КНОПКИ ===
   const webAppUrl = PUBLIC_URL || '';
+  const userStates = new Map(); // анкета в памяти (простая)
 
-  const userStates = new Map(); // простая анкетка в памяти
-
+  // --- /start: приветствие + автозапуск анкеты для новых пользователей ---
   bot.start(async (ctx) => {
     try {
-      // если профиль уже есть — просто приветствуем и даём кнопку «Открыть карту»
-      const p = await prisma.profile.findUnique({ where: { userId: String(ctx.from.id) } });
+      const uid = String(ctx.from.id);
+      const displayName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || ctx.from.username || 'друг';
+
+      // тёплое приветствие Пивика
+      await ctx.reply(
+        `Привет, ${displayName}! 😄\n\n` +
+        `Я Пивик — твой ассистент в мире Эфеса 🍻\n` +
+        `Помогу создать твою цифровую бутылочку и чокаться с друзьями!`,
+        {
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Открыть цифровую бутылочку', web_app: { url: webAppUrl } }]]
+          }
+        }
+      );
+
+      const p = await prisma.profile.findUnique({ where: { userId: uid } });
       if (p) {
-        await ctx.reply(
-          'Привет! Открывай свою Efes-карту и чокайся 🥂',
-          { reply_markup: { inline_keyboard: [[{ text: 'Открыть карту', web_app: { url: webAppUrl } }]] } }
-        );
+        // профиль уже есть — ничего больше не спрашиваем
         return;
       }
+
+      // профиля нет — сразу запускаем анкету
+      userStates.set(ctx.from.id, { step: 'name', draft: {} });
+      await ctx.reply('Давай создадим твою бутылочку! Как тебя зовут?');
     } catch (e) {
       console.error('profile check on /start:', e);
     }
-
-    // профиля нет — запускаем диалог
-    userStates.set(ctx.from.id, { step: 'name', draft: {} });
-    await ctx.reply('Привет! Заполним мини-анкету. Как тебя зовут?');
   });
 
+  // --- Анкета (всегда доступна для новых; простая последовательность) ---
   bot.on('text', async (ctx) => {
     const st = userStates.get(ctx.from.id);
-    if (!st) return;
+    if (!st) return; // не в анкете — игнор
 
     const text = (ctx.message.text || '').trim();
     const uid  = String(ctx.from.id);
@@ -391,7 +424,7 @@ async function initBot() {
     if (st.step === 'name') {
       st.draft.name = text.slice(0,120);
       st.step = 'age';
-      return ctx.reply('Супер! Сколько тебе лет? ');
+      return ctx.reply('Отлично! Сколько тебе лет? (числом, 21–120)');
     }
 
     if (st.step === 'age') {
@@ -414,8 +447,8 @@ async function initBot() {
       try {
         await prisma.profile.upsert({
           where:  { userId: uid },
-          create: { userId: uid, name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact || '', design: 'classic' },
-          update: { name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact || '' }
+          create: { userId: uid, name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact || '', design: 'classic', tgUsername: ctx.from.username || null },
+          update: { name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact || '', tgUsername: ctx.from.username || null }
         });
         userStates.delete(ctx.from.id);
         await ctx.reply(
@@ -429,10 +462,24 @@ async function initBot() {
     }
   });
 
-  // 5) подключаем вебхук
+  // Доп. меню (по желанию)
+  bot.action('open_bottle', async (ctx) => {
+    await ctx.reply('Открываю твою бутылочку 🍺', {
+      reply_markup: { inline_keyboard: [[{ text: 'Открыть', web_app: { url: webAppUrl } }]] }
+    });
+    await ctx.answerCbQuery();
+  });
+
+  bot.action('main_menu', async (ctx) => {
+    await ctx.reply('Главное меню 📋', {
+      reply_markup: { inline_keyboard: [[{ text: 'Открыть цифровую бутылочку', web_app: { url: webAppUrl } }]] }
+    });
+    await ctx.answerCbQuery();
+  });
+
+  // --- webhook ---
   const webhookPath = `/bot/${WEBHOOK_SECRET}`;
   app.use(bot.webhookCallback(webhookPath));
-
   await bot.telegram.setWebhook(`${PUBLIC_URL}${webhookPath}`);
   console.log('Bot: webhook set to', `${PUBLIC_URL}${webhookPath}`);
 }
@@ -441,7 +488,5 @@ async function initBot() {
 app.listen(PORT, () => {
   console.log(`Efes app listening on :${PORT}`);
   if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
-
-  // IMPORTANT: start bot + set webhook on boot
   initBot().catch(err => console.error('Bot init failed:', err));
 });

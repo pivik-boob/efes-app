@@ -8,65 +8,67 @@
   <!-- Telegram Mini App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-  <!-- Стили -->
+  <!-- Основные стили -->
   <link rel="stylesheet" href="style.css">
 
-  <!-- НЕМНОГО ВИЗУАЛА ДЛЯ ВЫБОРА ДИЗАЙНА (можешь перенести в style.css) -->
+  <!-- Небольшие стили для карточек выбора дизайна -->
   <style>
     .design-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:8px; }
-    .design-card { padding:10px; border:1px solid #d3d8e0; border-radius:10px; text-align:center; cursor:pointer; }
-    .design-card.selected { outline:2px solid #0f5ea8; border-color:#0f5ea8; }
-    .hint { font-size:12px; opacity:.8; }
+    .design-card { padding:10px; border:1px solid #d3d8e0; border-radius:10px; text-align:center; cursor:pointer; background:rgba(255,255,255,.06); color:#fff; }
+    .design-card.selected { outline:2px solid #ffd700; border-color:#ffd700; }
+    .hint { font-size:12px; opacity:.9; }
   </style>
 </head>
+
+<!-- Стартуем с темы EFES -->
 <body class="theme-efes">
   <div class="card">
     <h1>🍺 Efes Club Card</h1>
 
-    <!-- Статусная шапка -->
+    <!-- Статус -->
     <h2 id="username">Загрузка...</h2>
     <p>Бонусов: <span id="score">0</span></p>
     <p id="status">Нажми «Чок!» → тряси телефон</p>
     <p id="partner"></p>
 
-    <!-- Бутылочка -->
+    <!-- Бутылочка + слои эффектов -->
     <div id="bottleWrap" class="bottle-wrap">
       <img id="bottle" class="bottle-img" src="efes-bottle.png" alt="Efes Bottle">
       <div id="cap" class="cap" aria-hidden="true"></div>
       <div id="foam" class="foam" aria-hidden="true"></div>
     </div>
 
-    <!-- Кнопка: включает режим «готов к тряске» -->
+    <!-- ЧОК -->
     <button class="btn" id="shakeBtn" title="1) Нажми, 2) Тряси телефон">Чок!</button>
     <div class="hint" style="margin-top:4px;">
       Шаги: <b>нажми «Чок!»</b> → <b>встряхни</b> в течение 10 сек.
     </div>
 
-    <!-- АНКЕТА (показывается только если профиля ещё нет) -->
-   <section id="editBlock" hidden style="text-align:left; margin-top:14px;">
-  <h3>Редактирование анкеты</h3>
+    <!-- АНКЕТА -->
+    <section id="editBlock" hidden style="text-align:left; margin-top:14px;">
+      <h3>Редактирование анкеты</h3>
 
-  <label>Имя<br>
-    <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
-  </label><br><br>
+      <label>Имя<br>
+        <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
+      </label><br><br>
 
-  <label>Возраст (21+)<br>
-    <input id="ageInput" type="number" min="21" max="120" placeholder="18" required>
-  </label><br><br>
+      <label>Возраст (21+)<br>
+        <input id="ageInput" type="number" min="21" max="120" placeholder="18" required>
+      </label><br><br>
 
-  <label>Настроение<br>
-    <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
-  </label><br><br>
+      <label>Настроение<br>
+        <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
+      </label><br><br>
 
-  <label>Контакт (Telegram @username или Instagram)<br>
-    <input id="contactInput" type="text" placeholder="@nickname" required>
-  </label><br><br>
+      <label>Контакт (Telegram @username или Instagram)<br>
+        <input id="contactInput" type="text" placeholder="@nickname" required>
+      </label><br><br>
 
-  <button class="btn" id="saveProfileBtn">Сохранить</button>
-  <button class="btn" id="cancelEditBtn" style="margin-left:8px;background:#666;">Отменить</button>
-</section>
+      <button class="btn" id="saveProfileBtn">Сохранить</button>
+      <button class="btn" id="cancelEditBtn" style="margin-left:8px;background:#666;">Отменить</button>
+    </section>
 
-    <!-- ВЫБОР ДИЗАЙНА (если ещё не выбран) -->
+    <!-- ВЫБОР ДИЗАЙНА -->
     <div id="designSection" style="display:none; margin-top:16px;">
       <h3>Выбери дизайн бутылочки</h3>
       <div id="designOptions" class="design-grid">
@@ -76,21 +78,20 @@
       </div>
       <button class="btn" id="saveDesignBtn" style="margin-top:8px;">Выбрать</button>
       <div class="hint" style="margin-top:6px;">
-        Или пройди <a href="/quiz">тест «Какая ты бутылочка?»</a> — подберём автоматически.
+        Или пройди <a href="/quiz" style="color:#ffd700;">тест «Какая ты бутылочка?»</a> — подберём автоматически.
       </div>
     </div>
 
-
-    <!-- Селектор темы (оставляю как у тебя) -->
+    <!-- Селектор 4 тем -->
     <div class="theme-row" style="margin-top:10px;">
-  Тема:
-  <select id="themeSel">
-    <option value="efes">EFES</option>
-    <option value="miller">Miller</option>
-    <option value="ruzka">Кружка свежего</option>
-    <option value="medved">Белый медведь</option>
-  </select>
-</div>
+      Тема:
+      <select id="themeSel">
+        <option value="efes">EFES</option>
+        <option value="miller">Miller</option>
+        <option value="ruzka">Кружка свежего</option>
+        <option value="medved">Белый медведь</option>
+      </select>
+    </div>
 
     <!-- История чоков -->
     <div id="historyBox" style="margin-top:12px; width:100%; text-align:left;">
@@ -104,26 +105,23 @@
       <button class="btn" id="giftBtn">Угостить 🍺</button>
       <a class="btn" href="/quiz" style="text-decoration:none; display:inline-block; text-align:center;">Пройти тест</a>
       <div style="margin-top:12px;">
-  <button class="btn" id="editBtn">✏️ Редактировать анкету</button>
-  <button class="btn" id="fillInChatBtn" style="margin-left:8px; display:none;">
-    Заполнить в чате
-  </button>
-</div>
+        <button class="btn" id="editBtn">✏️ Редактировать анкету</button>
+        <button class="btn" id="fillInChatBtn" style="margin-left:8px; display:none;">
+          Заполнить в чате
+        </button>
+      </div>
+    </div>
 
-    <!-- Fallback-кнопка: покажется только если мини-апп открыли не из бота -->
+    <!-- Fallback-кнопка -->
     <button id="openFromBotBtn"
-            style="display:none; background:transparent; color:#0f5ea8; border:1px solid #0f5ea84a; border-radius:10px; padding:8px 10px; margin-top:8px; cursor:pointer;">
+            style="display:none; background:transparent; color:#ffd700; border:1px solid #ffd70066; border-radius:10px; padding:8px 10px; margin-top:8px; cursor:pointer;">
       Открыть мини-апп из бота
     </button>
   </div>
 
-  <!-- Адрес backend (Render) и имя бота -->
+  <!-- Адрес backend и имя бота (как было) -->
   <script>
-    // Если у тебя адрес стабильный и это он — оставляй так.
     window.__API_BASE__ = 'https://efes-app.onrender.com';
-    // Альтернатива (авто): window.__API_BASE__ = location.origin;
-
-    // Имя твоего бота без @
     window.__BOT_USERNAME__ = 'EfesConnectBot';
   </script>
 
@@ -135,7 +133,52 @@
     <source src="sounds/can_open.mp3" type="audio/mpeg">
   </audio>
 
-  <!-- Скрипт приложения -->
+  <!-- Твой основной скрипт -->
   <script src="/script2.js" defer></script>
+
+  <!-- Безопасные помощники: username + темы (не ломают твой script2.js) -->
+  <script>
+    (function() {
+      // Username из Telegram (если открыто внутри Telegram)
+      document.addEventListener('DOMContentLoaded', function () {
+        try {
+          const tg = window.Telegram?.WebApp;
+          const user = tg?.initDataUnsafe?.user;
+          if (user) {
+            document.getElementById('username').textContent =
+              user.username ? '@' + user.username : (user.first_name || 'Гость');
+          }
+        } catch (_) {}
+      });
+
+      // Если твой script2.js уже определил setTheme — используем его. Если нет — дадим свой.
+      if (typeof window.setTheme !== 'function') {
+        const THEMES = {
+          efes:   { cls: 'theme-efes',   bottle: 'img/ефес.jpg' },
+          miller: { cls: 'theme-miller', bottle: 'img/миллер.jpg' },
+          ruzka:  { cls: 'theme-ruzka',  bottle: 'img/ружка свежего.jpg' },
+          medved: { cls: 'theme-medved', bottle: 'img/медведь.jpg' },
+        };
+        window.setTheme = function(name){
+          const t = THEMES[name] || THEMES.efes;
+          document.body.className = t.cls;
+          const img = document.getElementById('bottle');
+          if (img) img.src = t.bottle;
+          try { localStorage.setItem('efes_theme', name); } catch(_) {}
+        };
+      }
+
+      // Инициализация селектора тем и восстановление выбора
+      document.addEventListener('DOMContentLoaded', function () {
+        const sel = document.getElementById('themeSel');
+        if (!sel) return;
+        let saved = null;
+        try { saved = localStorage.getItem('efes_theme'); } catch(_) {}
+        window.setTheme(saved || 'efes');
+        sel.value = saved || 'efes';
+        sel.addEventListener('change', e => window.setTheme(e.target.value));
+      });
+    })();
+  </script>
 </body>
 </html>

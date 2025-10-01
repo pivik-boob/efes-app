@@ -5,8 +5,8 @@
   font-weight:normal;
   font-style:normal;
 }
-/* Применяем шрифт как базовый */
-body { font-family:'EpilepsySans', Arial, sans-serif; }
+
+/* ====== БАЗОВЫЕ ПЕРЕМЕННЫЕ (оставляю твои) ====== */
 :root {
   --efes-blue:#0f4c81;
   --efes-blue-dark:#002244;
@@ -18,11 +18,11 @@ body { font-family:'EpilepsySans', Arial, sans-serif; }
   --card-border:#ddd;
 }
 
-/* Светлая тема (по умолчанию) */
+/* ====== БАЗОВАЯ ВЁРСТКА (оставляю, но шрифт меняю) ====== */
 body {
   margin: 0;
   padding: 20px;
-  font-family: 'Arial', sans-serif;
+  font-family: 'EpilepsySans', Arial, sans-serif; /* <- пиксельный */
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -51,10 +51,10 @@ body {
 .card p  { margin: 6px 0; font-size: 15px; }
 
 /* ==== BOTTLE ==== */
-.bottle-wrap { width: 140px; margin: 18px auto 8px; }
-.bottle-img { width: 100%; transform-origin: 50% 100%; }
+.bottle-wrap { width: 140px; margin: 18px auto 8px; position: relative; }
+.bottle-img { width: 100%; transform-origin: 50% 100%; image-rendering: pixelated; }
 
-/* Анимации (общие для обеих тем) */
+/* Анимации (как у тебя) */
 @keyframes growShake {
   0%   { transform: scale(1.0) rotate(0); }
   20%  { transform: scale(1.2) rotate(-3deg); }
@@ -66,16 +66,31 @@ body {
 .bottle-img.growshake { animation: growShake 0.8s ease; }
 
 @keyframes popCap {
-  0%   { transform: translateY(0); opacity:1; }
-  100% { transform: translateY(-60px) rotate(-35deg); opacity:0; }
+  0%   { transform: translate(-50%,0) rotate(0); opacity:1; }
+  100% { transform: translate(-50%,-60px) rotate(-35deg); opacity:0; }
 }
-.cap.pop { animation: popCap .5s ease; }
+.cap.pop { animation: popCap .5s ease forwards; }
 
 @keyframes foamSpray {
-  0%   { opacity:1; transform:scale(0.5); }
-  100% { opacity:0; transform:scale(2); }
+  0%   { opacity:1; transform:translateX(-50%) scale(0.5); }
+  100% { opacity:0; transform:translateX(-50%) scale(2); }
 }
-.foam.spray { animation: foamSpray .9s ease; }
+.foam.spray { animation: foamSpray .9s ease forwards; }
+
+/* Слои эффектов (крышечка/пена) */
+.cap, .foam{
+  position:absolute; left:50%; transform:translateX(-50%);
+  pointer-events:none; opacity:0;
+}
+.cap{
+  top:8px; width:26px; height:10px;
+  background:#c9a66b; border:2px solid #4b3b20; border-radius:2px;
+}
+.foam{
+  top:-6px; width:78px; height:46px;
+  background:radial-gradient(#fff, rgba(255,255,255,.85));
+  border-radius:20px 20px 14px 14px;
+}
 
 /* Кнопки */
 .btn {
@@ -92,15 +107,12 @@ body {
 }
 .btn:hover { transform: scale(1.04); box-shadow: 0 6px 15px rgba(0,0,0,0.3); }
 
-.insta-row { margin-top: 10px; display: flex; justify-content: center; gap: 6px; }
-.insta-row input { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
-
 /* История */
 #historyBox { margin-top: 14px; text-align: left; }
 #historyBox h3 { font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin: 6px 0 4px; }
 #historyList li { padding: 6px 0; border-bottom: 1px dashed #ccc; }
 
-/* ==== DARK THEME (Efes beer style) ==== */
+/* ==== СТАРЫЙ "DARK THEME" (не используется, но оставляю на месте) ==== */
 :root[data-theme="dark"] {
   --bg: linear-gradient(to bottom, var(--efes-blue), var(--efes-blue-dark));
   --text:#fff;
@@ -126,44 +138,21 @@ body {
 }
 :root[data-theme="dark"] #historyBox h3 { color: var(--efes-gold-bright); border-color: var(--efes-gold); }
 :root[data-theme="dark"] #historyList li { border-color: rgba(255,215,0,.45); }
-/* === 4 темы фона === */
-.theme-efes   { background: url("img/ефес.jpg") no-repeat center center / cover; }
-.theme-miller { background: url("img/миллер.jpg") no-repeat center center / cover; }
-.theme-ruzka  { background: url("img/ружка свежего.jpg") no-repeat center center / cover; }
-.theme-medved { background: url("img/медведь.jpg") no-repeat center center / cover; }
 
-/* Карточка поверх фото-фона */
+/* ====== НОВЫЙ ДИЗАЙН: 4 темы + тёмная карточка поверх фото ====== */
+
+/* ФОНЫ (повышенная специфичность, чтобы перебить body { background: var(--bg) }) */
+body.theme-efes   { background: url("img/ефес.jpg") no-repeat center center / cover; }
+body.theme-miller { background: url("img/миллер.jpg") no-repeat center center / cover; }
+body.theme-ruzka  { background: url("img/ружка свежего.jpg") no-repeat center center / cover; }
+body.theme-medved { background: url("img/медведь.jpg") no-repeat center center / cover; }
+
+/* Карточка — тёмная и «золотая» поверх фото-фона */
 .card{
-  background: rgba(15, 30, 60, 0.92);
-  border: 2px solid var(--efes-gold);
+  background: rgba(15, 30, 60, 0.92) !important;
+  border: 2px solid var(--efes-gold) !important;
+  box-shadow: 0 0 24px rgba(0,0,0,0.6);
   color:#fff;
-  box-shadow: 0 0 24px rgba(0,0,0,.6);
 }
-.card h1{
-  color: var(--efes-gold-bright);
-  text-shadow: 0 0 8px rgba(0,0,0,.7);
-}
-.card h2, .card p { color:#fff; }
-
-/* Бутылка: пусть пиксельно рендерится и анимации из твоего файла работают */
-.bottle-wrap{ position:relative; }
-.bottle-img{ image-rendering: pixelated; }
-
-/* Доп. слои для эффектов (если захочешь «крышку»/«пену») */
-.cap, .foam{
-  position:absolute; left:50%; transform:translateX(-50%);
-  pointer-events:none; opacity:0;
-}
-.cap{
-  top:8px; width:26px; height:10px;
-  background:#c9a66b; border:2px solid #4b3b20; border-radius:2px;
-}
-.foam{
-  top:-6px; width:78px; height:46px;
-  background:radial-gradient(#fff, rgba(255,255,255,.85));
-  border-radius:20px 20px 14px 14px;
-}
-
-/* Анимации «крышки» и «пены» (под твои keyframes) */
-.cap.pop  { animation: popCap .5s ease forwards; }
-.foam.spray{ animation: foamSpray .9s ease forwards; }
+.card h1{ color:var(--efes-gold-bright) !important; text-shadow:0 0 8px rgba(0,0,0,.7); }
+.card h2, .card p { color:#fff !important; }
