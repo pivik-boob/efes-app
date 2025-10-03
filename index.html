@@ -14,7 +14,7 @@
 
 <!-- Стартуем с темы EFES -->
 <body class="theme-efes">
-   <main class="app-shell">
+    <main class="app-shell">
     <section class="card">
       <header class="card-header">
         <div class="title-group">
@@ -54,7 +54,13 @@
 
       <section class="card-bottle">
         <div id="bottleWrap" class="bottle-wrap">
-          <img id="bottle" class="bottle-img" src="img/bottle-efes-pixel.svg" alt="Efes Bottle">
+          <div
+            id="bottle"
+            class="bottle-img bottle-visual visual--bottle bottle--efes"
+            role="img"
+            aria-live="polite"
+            aria-label="Пиксельная бутылочка Efes"
+          ></div>
           <div id="cap" class="cap" aria-hidden="true"></div>
           <div id="foam" class="foam" aria-hidden="true"></div>
         </div>
@@ -62,34 +68,45 @@
       </section>
 
       <section id="designSection" class="card-section">
-  <div class="section-head">
-    <h3>Дизайн бутылочки</h3>
-    <button class="chip" id="saveDesignBtn" type="button">Сохранить</button>
-  </div>
-  <div id="designOptions" class="design-grid">
-    <div class="pixel-art-medved"></div>
-    <div class="pixel-art-miller"></div>
-    <div class="pixel-art-orange"></div>
+        <div class="section-head">
+          <h3>Дизайн бутылочки</h3>
+          <button class="chip" id="saveDesignBtn" type="button">Сохранить</button>
+        </div>
+        <div id="designOptions" class="design-grid">
+          <button class="design-card design-card--efes" data-design="efes" type="button">
+            <span class="design-icon bottle-visual visual--bottle bottle--efes" aria-hidden="true"></span>
+            <span class="design-label">Efes</span>
+          </button>
+          <button class="design-card design-card--miller" data-design="miller" type="button">
+            <span class="design-icon bottle-visual visual--bottle bottle--miller" aria-hidden="true"></span>
+            <span class="design-label">Miller</span>
+          </button>
+          <button class="design-card design-card--ruzka" data-design="ruzka" type="button">
+            <span class="design-icon bottle-visual visual--mug mug--ruzka" aria-hidden="true"></span>
+            <span class="design-label">Кружка свежего</span>
+          </button>
+          <button class="design-card design-card--medved" data-design="medved" type="button">
+            <span class="design-icon bottle-visual visual--bottle bottle--medved" aria-hidden="true"></span>
+            <span class="design-label">Белый медведь</span>
+          </button>
+        </div>
+      </section>
 
-    <div class="pixel-art-efes"></div>
-    
-  </div>
-</section>
-      <section id="editBlock" class="card-section" hidden>
+      <section id="editBlock" class="card-section profile-block" data-state="collapsed">
         <h3>Анкета</h3>
-        <label class="field">
+        <label class="field field--name">
           <span>Имя</span>
           <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
         </label>
-        <label class="field">
+        <label class="field field--age">
           <span>Возраст (21+)</span>
           <input id="ageInput" type="number" min="21" max="120" placeholder="21" required>
         </label>
-        <label class="field">
+        <label class="field field--mood">
           <span>Настроение</span>
           <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
         </label>
-        <label class="field">
+        <label class="field field--contact">
           <span>Контакт</span>
           <input id="contactInput" type="text" placeholder="@nickname" required>
         </label>
@@ -123,7 +140,7 @@
         <button class="btn ghost" id="fillInChatBtn" type="button" style="display:none;">Заполнить в чате</button>
       </footer>
     </section>
- <button id="openFromBotBtn" class="bot-entry" type="button" style="display:none;">
+   <button id="openFromBotBtn" class="bot-entry" type="button" style="display:none;">
       Открыть мини-апп из бота
     </button>
      </main>
@@ -144,7 +161,7 @@
   <!-- Безопасный помощник: показать fallback-кнопку вне Telegram -->
   <script>
     (function() {
-          document.addEventListener('DOMContentLoaded', function () {
+       document.addEventListener('DOMContentLoaded', function () {
                const fallback = document.getElementById('openFromBotBtn');
         if (!window.Telegram?.WebApp && fallback) {
           fallback.style.display = 'block';

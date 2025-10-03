@@ -52,29 +52,35 @@ const state = {
 const DESIGN_ASSETS = {
   efes: {
     label: "Efes",
-    src: "img/bottle-efes-pixel.svg",
-    filter: "none",
     theme: "efes",
+    visual: "bottle",
+    className: "bottle--efes",
   },
   miller: {
     label: "Miller",
-    src: "img/bottle-miller-pixel.svg",
-    filter: "none",
     theme: "miller",
+    visual: "bottle",
+    className: "bottle--miller",
   },
   ruzka: {
     label: "Кружка свежего",
-    src: "img/beer-mug-pixel.svg",
-    filter: "none",
     theme: "ruzka",
+    visual: "mug",
+    className: "mug--ruzka",
   },
   medved: {
     label: "Белый медведь",
-    src: "img/bottle-medved-pixel.svg",
-    filter: "none",
     theme: "medved",
+    visual: "bottle",
+    className: "bottle--medved",
   },
 };
+
+const DESIGN_CLASSNAMES = Object.values(DESIGN_ASSETS)
+  .map(cfg => cfg.className)
+  .filter(Boolean);
+
+const VISUAL_VARIANTS = ["visual--bottle", "visual--mug"];
 
 const DESIGN_ALIASES = {
   classic: "efes",
@@ -90,11 +96,178 @@ const THEMES = {
 };
 
 const THEME_BACKGROUNDS = {
-  efes: "url('img/bg-efes.jpg')",
-  miller: "url('img/bg-miller.jpg')",
-  ruzka: "url('img/bg-ruzka.jpg')",
-  medved: "url('img/bg-medved.jpg')",
+  efes: [
+    "img/bg-efes.jpg",
+    "img/Эфес.jpg",
+    "img/Эфес.jpeg",
+    "img/Эфес.png",
+  ],
+  miller: [
+    "img/bg-miller.jpg",
+    "img/Миллер.jpg",
+    "img/Миллер.jpeg",
+    "img/Миллер.png",
+  ],
+  ruzka: [
+    "img/bg-ruzka.jpg",
+    "img/Кружка свежего.jpg",
+    "img/Кружка свежего.jpeg",
+    "img/Кружка свежего.png",
+  ],
+  medved: [
+    "img/bg-medved.jpg",
+    "img/Белый медведь.jpg",
+    "img/Белый медведь.jpeg",
+    "img/Белый медведь.png",
+  ],
 };
+
+const backgroundCache = {};
+const backgroundPromises = {};
+
+function getBackgroundCandidates(theme) {
+  const key = THEMES[theme] ? theme : "efes";
+  const list = THEME_BACKGROUNDS[key];
+  if (Array.isArray(list)) {
+    return list.filter(Boolean);
+  }
+  if (typeof list === "string" && list) {
+    return [list];
+  }
+  const fallback = THEME_BACKGROUNDS.efes;
+  return Array.isArray(fallback) ? fallback.filter(Boolean) : [];
+}
+function getFallbackBackground(theme) {
+  const candidates = getBackgroundCandidates(theme);
+  if (candidates.length > 0) {
+    return candidates[0];
+  }
+  const fallback = getBackgroundCandidates("efes");
+  return fallback[0] || "";
+}
+
+function toCssUrl(path) {
+  if (!path) return "";
+  if (path.startsWith("url(")) return path;
+  const safe = path.replace(/'/g, "\\'");
+  return `url('${safe}')`;
+}
+
+function resolveBackground(theme) {
+  const key = THEMES[theme] ? theme : "efes";
+  if (backgroundCache[key]) {
+    return Promise.resolve(backgroundCache[key]);
+  }
+  if (typeof Image === "undefined") {
+    const fallback = getFallbackBackground(key);
+    backgroundCache[key] = fallback;
+    return Promise.resolve(fallback);
+  }
+  if (backgroundPromises[key]) {
+    return backgroundPromises[key];
+  }
+  const candidates = getBackgroundCandidates(key);
+  const fallback = getFallbackBackground(key);
+
+  backgroundPromises[key] = new Promise((resolve) => {
+    let index = 0;
+    const tryNext = () => {
+      if (index >= candidates.length) {
+        resolve(fallback);
+        return;
+      }
+      const candidate = candidates[index++];
+      if (!candidate) {
+        tryNext();
+        return;
+      }
+      const img = new Image();
+      img.onload = () => resolve(candidate);
+      img.onerror = tryNext;
+      img.src = candidate;
+    };
+       tryNext();
+  }).then((path) => {
+    backgroundCache[key] = path || fallback;
+    return backgroundCache[key];
+  }).finally(() => {
+    delete backgroundPromises[key];
+  });
+
+  return backgroundPromises[key];
+}
+function getResolvedBackground(theme) {
+  const key = THEMES[theme] ? theme : "efes";
+  return backgroundCache[key] || getFallbackBackground(key);
+}
+
+function updateDesignCardBackgrounds() {
+  if (!els.designOptions) return;
+  [...els.designOptions.querySelectorAll(".design-card")].forEach((card) => {
+    const designKey = card.dataset.design;
+    const themeKey = DESIGN_ASSETS[designKey]?.theme || designKey;
+    const backgroundPath = getResolvedBackground(themeKey);
+    if (backgroundPath) {
+      card.style.setProperty("--design-bg", toCssUrl(backgroundPath));
+    }
+  });
+}
+
+function primeBackgrounds() {
+  Object.keys(THEME_BACKGROUNDS).forEach((theme) => {
+    resolveBackground(theme)
+      .then(() => {
+        updateDesignCardBackgrounds();
+      })
+      .catch(() => {});
+  });
+}
+
+function formatUsername(value) {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
+function updateUsernameDisplay(profile) {
+  if (!els.username) return;
+  const tgUser = tg?.initDataUnsafe?.user;
+  if (tgUser?.username) {
+    els.username.textContent = formatUsername(tgUser.username);
+    return;
+  }
+  const contactHandle = profile?.contact && profile.contact.includes("@")
+    ? profile.contact
+    : null;
+  const profileUsername = formatUsername(
+    profile?.telegramUsername
+      || profile?.telegramUserName
+      || profile?.telegram_user
+      || profile?.telegram_user_name
+      || profile?.telegram
+      || profile?.tgUsername
+      || profile?.tg_username
+      || profile?.username
+      || contactHandle
+  );
+  if (profileUsername) {
+    els.username.textContent = profileUsername;
+    return;
+  }
+  if (tgUser) {
+    const fullName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ").trim();
+    if (fullName) {
+      els.username.textContent = fullName;
+      return;
+    }
+     }
+  if (profile?.name) {
+    els.username.textContent = profile.name;
+    return;
+  }
+  els.username.textContent = "Гость";
+}
 
 const LEVELS = [
   { level: 1, title: "Новичок", xp: 0 },
@@ -113,6 +286,7 @@ function toDayStamp(value) {
   date.setHours(0, 0, 0, 0);
   return date.getTime();
 }
+
 function computeStats(history = []) {
   const total = history.length;
   const uniquePartners = new Set();
@@ -130,6 +304,7 @@ function computeStats(history = []) {
     if (key) {
       uniquePartners.add(String(key));
     }
+
     const stamp = toDayStamp(entry?.at);
     if (stamp !== null) {
       dayCounts.set(stamp, (dayCounts.get(stamp) || 0) + 1);
@@ -137,7 +312,8 @@ function computeStats(history = []) {
       if (!Number.isNaN(raw)) {
         latest = Math.max(latest, raw);
       }
-    } });
+    }
+     });
 
   const todayStamp = toDayStamp(Date.now());
   let streak = 0;
@@ -147,7 +323,7 @@ function computeStats(history = []) {
       streak += 1;
       cursor -= DAY_MS;
     }
-    }
+     }
 
   const todayCount = todayStamp !== null ? (dayCounts.get(todayStamp) || 0) : 0;
 
@@ -171,10 +347,10 @@ function resolveLevel(xp) {
       current = lvl;
       next = LEVELS[Math.min(i + 1, LEVELS.length - 1)];
     } else {
-       next = lvl;
+            next = lvl;
       break;
     }
-    }
+     }
 
   const sameLevel = next.level === current.level;
   const span = sameLevel ? Math.max(1, current.xp || 1) : Math.max(1, next.xp - current.xp);
@@ -275,7 +451,6 @@ function setPartner(text) {
     els.partner.textContent = text || "";
   }
 }
-
 const DEFAULT_DROP_SHADOW = "drop-shadow(0 12px 18px rgba(0,0,0,0.45))";
 
 function applyDesign(design) {
@@ -285,15 +460,19 @@ function applyDesign(design) {
   const cfg = DESIGN_ASSETS[normalized] || DESIGN_ASSETS.efes;
   state.selectedDesign = normalized;
   if (els.bottle) {
-    if (cfg.src && els.bottle.getAttribute("src") !== cfg.src) {
-      els.bottle.setAttribute("src", cfg.src);
+    DESIGN_CLASSNAMES.forEach(cls => els.bottle.classList.remove(cls));
+    if (cfg.className) {
+      els.bottle.classList.add(cfg.className);
     }
-    const filters = [];
-    if (cfg.filter && cfg.filter !== "none") {
-      filters.push(cfg.filter);
+    VISUAL_VARIANTS.forEach(variant => els.bottle.classList.remove(variant));
+    if (cfg.visual) {
+      els.bottle.classList.add(`visual--${cfg.visual}`);
+    } else {
+      els.bottle.classList.add("visual--bottle");
     }
-    filters.push(DEFAULT_DROP_SHADOW);
-    els.bottle.style.filter = filters.join(" ");
+    const ariaPrefix = cfg.visual === "mug" ? "Пиксельная кружка" : "Пиксельная бутылочка";
+    els.bottle.setAttribute("aria-label", `${ariaPrefix} ${cfg.label}`.trim());
+    els.bottle.style.filter = DEFAULT_DROP_SHADOW;
   }
   if (els.designOptions) {
     [...els.designOptions.querySelectorAll(".design-card")].forEach(card => {
@@ -312,11 +491,24 @@ function applyTheme(name) {
   const cls = THEMES[themeName];
   document.body.classList.remove(...Object.values(THEMES));
   document.body.classList.add(cls);
-  const bg = THEME_BACKGROUNDS[themeName] || THEME_BACKGROUNDS.efes;
-  document.body.style.setProperty("--bg-img", bg);
+  const fallback = getFallbackBackground(themeName);
+  const fallbackCss = toCssUrl(fallback);
+  document.body.style.setProperty("--bg-img", fallbackCss);
   if (els.card) {
-    els.card.style.setProperty("--bg-img", bg);
+    els.card.style.setProperty("--bg-img", fallbackCss);
   }
+  resolveBackground(themeName)
+    .then((path) => {
+      const css = toCssUrl(path);
+      document.body.style.setProperty("--bg-img", css);
+      if (els.card) {
+        els.card.style.setProperty("--bg-img", css);
+      }
+      updateDesignCardBackgrounds();
+    })
+    .catch(() => {
+      updateDesignCardBackgrounds();
+    });
   try {
     localStorage.setItem("efes_theme", themeName);
   } catch (_) {}
@@ -433,16 +625,17 @@ function animateBottle() {
   els.foam?.classList.add("spray");
   document.getElementById("sfx-bottle")?.play?.();
 }
+
+// ===== iOS motion permission =====
 async function ensureMotionPermission() {
-  try { if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+  try {   if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
       const status = await DeviceMotionEvent.requestPermission();
       return status === "granted";
     }
     return true; } catch (_) {
     return false;
   }
-}
-function onMotion(event) {
+}function onMotion(event) {
   if (!state.listening) return;
   const acc = event.accelerationIncludingGravity;
   if (!acc) return;
@@ -452,8 +645,7 @@ function onMotion(event) {
   }
 }
 
-async function snapshotHistory() {
-  try {
+async function snapshotHistory() {try {
     const data = await requestJSON("/api/history");
     const last = data?.history?.[0];
     state.lastHistoryTimestamp = last ? new Date(last.at).getTime() : 0;
@@ -461,10 +653,10 @@ async function snapshotHistory() {
     console.warn("snapshotHistory", error);
   }
 }
-
 async function waitForPartner(deadline) {
   setStatus("Ищу партнёра рядом…");
-  while (Date.now() < deadline) { try {
+  while (Date.now() < deadline) {
+    try {
       const data = await requestJSON("/api/history");
       const last = data?.history?.[0];
       if (last) {
@@ -492,7 +684,7 @@ async function handleShake() {
   setStatus("Чокаемся…");
 
   await snapshotHistory();
-   try {
+try {
     const result = await requestJSON("/api/shake", { method: "POST" });
     if (result?.status === "matched" && result.other) {
       renderPartner(result.other);
@@ -550,22 +742,18 @@ async function loadProfile() {
     const data = await requestJSON("/api/profile/me");
     const profile = data?.profile || null;
     state.profile = profile;
+    updateUsernameDisplay(profile);
     if (!profile) {
       setPartner("");
       if (els.fillInChatBtn) {
         els.fillInChatBtn.style.display = "";
       }
+      showEdit(true);
       return;
     }
 
     if (els.fillInChatBtn) {
       els.fillInChatBtn.style.display = "none";
-    }
-
-    if (!tg?.initDataUnsafe?.user?.username) {
-      if (els.username) {
-        els.username.textContent = profile.name || "Гость";
-      }
     }
 
     if (els.nameInput && !els.nameInput.value) {
@@ -590,6 +778,9 @@ async function loadProfile() {
     if (els.designSection) {
       els.designSection.style.display = "block";
     }
+    if (els.editBlock && els.editBlock.dataset.state !== "open") {
+      showEdit(false);
+    }
   } catch (error) {
     console.warn("loadProfile", error);
   }
@@ -600,7 +791,7 @@ function renderPartner(partner) {
     setPartner("");
     return;
   }
-   if (partner.withName || partner.withUsername) {
+  if (partner.withName || partner.withUsername) {
     const name = partner.withName || partner.name || "Гость";
     const username = partner.withUsername || partner.username;
     setPartner(`Вы чокнулись с ${name}${username ? ` (@${username})` : ""}`);
@@ -631,19 +822,41 @@ async function loadHistory() {
   }
 }
 
-function showEdit(visible) {
-  if (els.editBlock) {
-    els.editBlock.hidden = !visible;
+function showEdit(open) {
+  if (!els.editBlock) return;
+  els.editBlock.hidden = false;
+  els.editBlock.dataset.state = open ? "open" : "collapsed";
+  if (els.saveProfileBtn) {
+    els.saveProfileBtn.textContent = open ? "Сохранить" : "Обновить настроение";
+  }
+  if (els.cancelEditBtn) {
+    els.cancelEditBtn.style.display = open ? "" : "none";
   }
 }
 
 async function saveProfile() {
   if (!els.nameInput || !els.ageInput || !els.moodInput || !els.contactInput) return;
+  const nameValue = els.nameInput.value.trim() || state.profile?.name || "";
+  const moodValue = els.moodInput.value.trim();
+  const contactValue = els.contactInput.value.trim() || state.profile?.contact || "";
+  const rawAge = els.ageInput.value.trim();
+  let age = rawAge ? Number(rawAge) : undefined;
+  if (!Number.isFinite(age)) {
+    age = undefined;
+  }
+  if (age === undefined && state.profile) {
+    if (typeof state.profile.age === "number" && !Number.isNaN(state.profile.age)) {
+      age = state.profile.age;
+    } else if (state.profile.age21 === true) {
+      age = 21;
+    }
+  }
+
   const payload = {
-    name: els.nameInput.value.trim(),
-    age: Number(els.ageInput.value) || undefined,
-    mood: els.moodInput.value.trim(),
-    contact: els.contactInput.value.trim(),
+    name: nameValue,
+    age,
+    mood: moodValue,
+    contact: contactValue,
     design: state.selectedDesign,
   };
 
@@ -651,7 +864,13 @@ async function saveProfile() {
     setStatus("Имя обязательно");
     return;
   }
-   return;
+  if (!payload.age || payload.age < 21) {
+    setStatus("Минимальный возраст — 21");
+    return;
+  }
+    if (!payload.mood) {
+    setStatus("Добавь настроение ✨");
+    return;
   }
   
   try {
@@ -666,8 +885,7 @@ async function saveProfile() {
     console.error("saveProfile", error);
     setStatus("Не удалось сохранить анкету");
   }
-
-async function saveDesign() {
+}async function saveDesign() {
   try {
     const result = await saveDesignPayload(state.selectedDesign);
     if (result?.ok || result?.profile) {
@@ -679,7 +897,6 @@ async function saveDesign() {
     setStatus("Не удалось сохранить дизайн");
   }
 }
-
 function openBot() {
   if (BOT_USERNAME) {
     window.location.href = `https://t.me/${BOT_USERNAME}`;
@@ -693,7 +910,9 @@ function initDesignCards() {
     });
   });
   applyDesign(state.selectedDesign);
+  updateDesignCardBackgrounds();
 }
+
 function initThemeSelect() {
   if (!els.themeSelect) return;
   let saved = null;
@@ -712,24 +931,17 @@ function initThemeSelect() {
 }
 
 function initUsername() {
-  const user = tg?.initDataUnsafe?.user;
-  if (user && els.username) {
-    if (user.username) {
-      els.username.textContent = `@${user.username}`;
-    } else {
-      const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-      els.username.textContent = name || "Гость";
-    }
-  }
+  updateUsernameDisplay(state.profile);
 }
 
 function initButtons() {
   els.editBtn?.addEventListener("click", () => {
     if (els.fillInChatBtn && els.fillInChatBtn.style.display !== "none") {
       openBot();
-    } else {
-      showEdit(true);
+      return;
     }
+    const isOpen = els.editBlock?.dataset.state === "open";
+    showEdit(!isOpen);
   });
 
   els.cancelEditBtn?.addEventListener("click", () => {
@@ -768,6 +980,8 @@ async function init() {
   initUsername();
   initThemeSelect();
   initDesignCards();
+  showEdit(false);
+  primeBackgrounds();
   initButtons();
   initMotionListener();
 
