@@ -1,365 +1,779 @@
-// ===== Telegram Mini App bootstrap =====
 const tg = window.Telegram?.WebApp;
 if (tg) tg.ready();
+const API_BASE = window.__API_BASE__ || "";
+const BOT_USERNAME = window.__BOT_USERNAME__ || "";
 
-const API = window.__API_BASE__ || "";
-const BOT = window.__BOT_USERNAME__ || "";
+const els = {
+  card: document.querySelector(".card"),
+  username: document.getElementById("username"),
+  status: document.getElementById("status"),
+  partner: document.getElementById("partner"),
+  shakeBtn: document.getElementById("shakeBtn"),
+  bottle: document.getElementById("bottle"),
+  cap: document.getElementById("cap"),
+  foam: document.getElementById("foam"),
+  shakeTimer: document.getElementById("shakeTimer"),
+  shakeCountdown: document.getElementById("shakeCountdown"),
+  levelLabel: document.getElementById("levelLabel"),
+  titleLabel: document.getElementById("titleLabel"),
+  xpLabel: document.getElementById("xpLabel"),
+  streakLabel: document.getElementById("streakLabel"),
+  xpFill: document.getElementById("xpFill"),
+  xpBar: document.querySelector(".xp-bar"),
+  questList: document.getElementById("questList"),
+  editBlock: document.getElementById("editBlock"),
+  editBtn: document.getElementById("editBtn"),
+  cancelEditBtn: document.getElementById("cancelEditBtn"),
+  saveProfileBtn: document.getElementById("saveProfileBtn"),
+  nameInput: document.getElementById("nameInput"),
+  ageInput: document.getElementById("ageInput"),
+  moodInput: document.getElementById("moodInput"),
+  contactInput: document.getElementById("contactInput"),
+  fillInChatBtn: document.getElementById("fillInChatBtn"),
+  friendsBtn: document.getElementById("friendsBtn"),
+  themeSelect: document.getElementById("themeSel"),
+  historyList: document.getElementById("historyList"),
+  historyBox: document.getElementById("historyBox"),
+  designSection: document.getElementById("designSection"),
+  designOptions: document.getElementById("designOptions"),
+  saveDesignBtn: document.getElementById("saveDesignBtn"),
+  openFromBotBtn: document.getElementById("openFromBotBtn"),
+};
 
-// ===== Helpers: selectors (поддержка старых и новых ID) =====
-function q(...ids) {
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    if (el) return el;
-  }
-  return null;
-}
-function on(el, ev, fn) { if (el) el.addEventListener(ev, fn); }
-function setText(el, txt) { if (el) el.textContent = txt; }
+const state = {
+  listening: false,
+  countdownTimer: null,
+  countdownEndsAt: 0,
+  lastHistoryTimestamp: 0,
+  selectedDesign: "efes",
+  profile: null,
+};
 
-// UI (оба набора ID, где известно)
-const usernameEl  = q("username", "userName", "headerUsername");
-const statusEl    = q("status", "stateText");
-const partnerEl   = q("partner", "matchPartner");
-const historyEl   = q("historyList", "history", "listHistory");
-const shakeBtn    = q("shakeBtn", "btnShake", "btnCheers");
+const DESIGN_ASSETS = {
+  efes: {
+    label: "Efes",
+    src: "img/bottle-efes-pixel.svg",
+    filter: "none",
+    theme: "efes",
+  },
+  miller: {
+    label: "Miller",
+    src: "img/bottle-miller-pixel.svg",
+    filter: "none",
+    theme: "miller",
+  },
+  ruzka: {
+    label: "Кружка свежего",
+    src: "img/beer-mug-pixel.svg",
+    filter: "none",
+    theme: "ruzka",
+  },
+  medved: {
+    label: "Белый медведь",
+    src: "img/bottle-medved-pixel.svg",
+    filter: "none",
+    theme: "medved",
+  },
+};
 
-const editBlock   = q("editBlock", "profileEditBlock");
-const editBtn     = q("editBtn", "btnEdit");
-const cancelEdit  = q("cancelEditBtn", "btnCancelEdit");
-const fillInChat  = q("fillInChatBtn", "btnFillInChat");
+const DESIGN_ALIASES = {
+  classic: "efes",
+  fest: "ruzka",
+  ornament: "medved",
+};
 
-// профиль (анкета)
-const formProfile = q("profileForm", "frmProfile");
-const inpName     = q("inpName", "name", "inputName");
-const inp21Yes    = q("inp21Yes", "age21yes");
-const inp21No     = q("inp21No", "age21no");
-const inpMood     = q("inpMood", "mood");
-const inpDesign   = q("inpDesign", "designSelect");
-
-// кнопки из твоего плана
-const btnFriends  = q("friendsBtn", "btnFriends", "openFriends");
-const btnGift     = q("giftBtn", "btnGift", "openGift");
-const btnTheme    = q("themeBtn", "btnTheme", "openTheme");
-
-// анимации (если есть)
-const bottleEl = q("bottle");
-const capEl    = q("cap");
-const foamEl   = q("foam");
-
-// ===== Fetch helpers =====
-async function getJSON(url) {
-  const auth = tg?.initData || "";
-  const r = await fetch(API + url, { headers: { "Authorization": auth } });
-  return r.json();
-}
-async function postJSON(url, body) {
-  const auth = tg?.initData || "";
-  const r = await fetch(API + url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": auth },
-    body: JSON.stringify(body || {})
-  });
-  return r.json();
-}
-
-// ===== Shims (оба API варианта) =====
-async function saveProfile(data) {
-  // 1) новый эндпоинт
-  try {
-    const r = await postJSON("/api/profile/update", data);
-    if (r?.ok || r?.profile) return r;
-  } catch {}
-  // 2) старый эндпоинт
-  try {
-    const payload = {
-      name: data.name,
-      age: data.age21 === true ? 21 : (data.age21 === false ? 18 : undefined),
-      mood: data.mood,
-      contact: undefined // instagram не трогаем — анкета сама спросит в боте
-    };
-    const r = await postJSON("/api/profile/save", payload);
-    if (r?.ok || r?.profile) return r;
-  } catch {}
-  return { ok: false };
-}
-
-async function saveDesign(design) {
-  // 1) новый
-  try {
-    const r = await postJSON("/api/profile/design", { design });
-    if (r?.ok || r?.profile) return r;
-  } catch {}
-  // 2) старый
-  try {
-    const r = await postJSON("/api/save_design", { design });
-    if (r?.ok || r?.profile) return r;
-  } catch {}
-  return { ok: false };
-}
-
-// ===== Status helpers =====
-function setStatus(txt) { setText(statusEl, txt || ""); }
-function showEdit(on) { if (editBlock) editBlock.hidden = !on; }
-function openBot() { if (BOT) window.location.href = `https://t.me/${BOT}`; }
-
-// ===== Username из initData (без анкеты) =====
-(function showInitUsername() {
-  const u = tg?.initDataUnsafe?.user || null;
-  if (!u) return;
-  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
-  if (u.username) {
-    setText(usernameEl, full ? `${full} (@${u.username})` : `@${u.username}`);
-  } else if (full && !usernameEl?.textContent) {
-    setText(usernameEl, full);
-  }
-})();
-
-// ===== Профиль/История =====
-async function loadProfile() {
-  try {
-    const r = await getJSON("/api/profile/me");
-    const p = r?.profile;
-    if (!p) {
-      if (fillInChat) fillInChat.style.display = "";
-      return;
-    }
-    if (fillInChat) fillInChat.style.display = "none";
-    // если у пользователя нет tg username — покажем имя из профиля
-    if (!(tg?.initDataUnsafe?.user?.username)) {
-      setText(usernameEl, p.name || "Гость");
-    }
-    // заполнить форму (если есть поля)
-    if (inpName && !inpName.value) inpName.value = p.name || "";
-    if (typeof p.age21 === "boolean") {
-      if (p.age21 && inp21Yes) inp21Yes.checked = true;
-      if (!p.age21 && inp21No) inp21No.checked = true;
-    }
-    if (inpMood && !inpMood.value)   inpMood.value = p.mood || "🙂";
-    if (inpDesign && !inpDesign.value) inpDesign.value = p.design || "classic";
-  } catch {}
-}
-
-async function loadHistory() {
-  try {
-    const r = await getJSON("/api/history");
-    const hist = r?.history || [];
-    if (!historyEl) return;
-    historyEl.innerHTML = "";
-    hist.forEach(h => {
-      const li = document.createElement("li");
-      const uname = h.withUsername ? ` (@${h.withUsername})` : "";
-      const when = h.at ? ` — ${new Date(h.at).toLocaleString()}` : "";
-      li.textContent = `${h.withName}${uname}${when}`;
-      historyEl.appendChild(li);
-    });
-  } catch {}
-}
-
-// ===== Анкета (инстаграм не трогаем) =====
-if (formProfile) {
-  on(formProfile, "submit", async (e) => {
-    e.preventDefault();
-    const payload = {
-      name: (inpName?.value || "").trim(),
-      age21: inp21Yes?.checked ? true : (inp21No?.checked ? false : undefined),
-      mood: (inpMood?.value || "").trim(),
-      design: (inpDesign?.value || "").trim()
-    };
-    const r = await saveProfile(payload);
-    if (r?.ok || r?.profile) {
-      showEdit(false);
-      await loadProfile();
-      setStatus("Анкета обновлена ✅");
-    } else {
-      setStatus("Не удалось сохранить анкету");
-    }
-  });
-}
-if (editBtn)     on(editBtn, "click", () => { 
-  if (fillInChat && fillInChat.style.display !== "none") return openBot();
-  showEdit(true);
-});
-if (cancelEdit)  on(cancelEdit, "click", () => showEdit(false));
-if (fillInChat)  on(fillInChat, "click", openBot);
-
-// ===== Friends / Gift / Theme =====
-if (btnFriends) {
-  on(btnFriends, "click", async () => {
-    await loadHistory();
-    setStatus("Показана история чоков 📜");
-  });
-}
-if (btnGift) {
-  on(btnGift, "click", async () => {
-    try {
-      const r = await postJSON("/api/gift/create", {}); // твой сервер вернёт {ok, code, link}
-      if (r?.ok && r.link) {
-        setStatus("Подарочный код создан 🎁");
-        // можно показать модалку/alert, чтобы скопировать
-        alert(`Подарочный код: ${r.code}\nСсылка: ${r.link}`);
-      } else {
-        setStatus("Не удалось создать подарок");
-      }
-    } catch {
-      setStatus("Ошибка при создании подарка");
-    }
-  });
-}
-if (btnTheme) {
-  on(btnTheme, "click", async () => {
-    // === Темы (фон + картинка) ===
 const THEMES = {
-  efes:   { bgClass: 'theme-efes',   bottleSrc: 'img/ефес.jpg',          label: 'EFES' },
-  miller: { bgClass: 'theme-miller', bottleSrc: 'img/миллер.jpg',        label: 'Miller' },
-  ruzka:  { bgClass: 'theme-ruzka',  bottleSrc: 'img/ружка свежего.jpg', label: 'Кружка свежего' },
-  medved: { bgClass: 'theme-medved', bottleSrc: 'img/медведь.jpg',       label: 'Белый медведь' },
+  efes: "theme-efes",
+  miller: "theme-miller",
+  ruzka: "theme-ruzka",
+  medved: "theme-medved",
 };
 
-function setTheme(name) {
-  const cfg = THEMES[name] || THEMES.efes;
-  document.body.className = cfg.bgClass;
-  const bottle = document.getElementById('bottle');
-  if (bottle) bottle.src = cfg.bottleSrc;
-  try { localStorage.setItem('efes_theme', name); } catch(_) {}
-}
-
-function initThemesUI() {
-  const sel = document.getElementById('themeSel');
-  if (!sel) return;
-  let saved = null;
-  try { saved = localStorage.getItem('efes_theme'); } catch(_) {}
-  setTheme(saved || 'efes');
-  sel.value = saved || 'efes';
-  sel.addEventListener('change', e => setTheme(e.target.value));
-}
-  });
-}
-
-// === Анимация бутылки ===
-window.shakeBottle = function(){
-  const bottle = document.getElementById('bottle');
-  const cap    = document.getElementById('cap');
-  const foam   = document.getElementById('foam');
-
-  [bottle, cap, foam].forEach(el=>{
-    if(!el) return;
-    el.classList.remove('growshake','pop','spray');
-    void el.offsetWidth; // reset
-  });
-
-  bottle?.classList.add('growshake');
-  cap?.classList.add('pop');
-  foam?.classList.add('spray');
-
-  document.getElementById('sfx-bottle')?.play?.();
+const THEME_BACKGROUNDS = {
+  efes: "url('img/bg-efes.jpg')",
+  miller: "url('img/bg-miller.jpg')",
+  ruzka: "url('img/bg-ruzka.jpg')",
+  medved: "url('img/bg-medved.jpg')",
 };
 
-// ===== iOS motion permission =====
-async function ensureMotionPermission() {
-  try {
-    // @ts-ignore
-    if (typeof DeviceMotionEvent !== "undefined" &&
-        typeof DeviceMotionEvent.requestPermission === "function") {
-      const st = await DeviceMotionEvent.requestPermission();
-      return st === "granted";
+const LEVELS = [
+  { level: 1, title: "Новичок", xp: 0 },
+  { level: 2, title: "Чок-мастер", xp: 120 },
+  { level: 3, title: "Пенный герой", xp: 260 },
+  { level: 4, title: "Король бара", xp: 420 },
+  { level: 5, title: "Легенда клуба", xp: 600 },
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function toDayStamp(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+function computeStats(history = []) {
+  const total = history.length;
+  const uniquePartners = new Set();
+  const dayCounts = new Map();
+  let latest = 0;
+
+  history.forEach((entry) => {
+    const key = entry?.withUsername
+      || entry?.withUserId
+      || entry?.partnerId
+      || entry?.withName
+      || entry?.name
+      || entry?.id
+      || entry?._id;
+    if (key) {
+      uniquePartners.add(String(key));
     }
-    return true;
-  } catch { return false; }
-}
-
-// ===== Shake detection (улучшённая) =====
-let listening = false;
-let listenTimer = null;
-let lastHistoryTs = 0;
-
-function mag(acc) {
-  if (!acc) return 0;
-  return Math.abs(acc.x||0) + Math.abs(acc.y||0) + Math.abs(acc.z||0);
-}
-async function snapshotHistory() {
-  const d = await getJSON("/api/history");
-  const last = (d?.history || [])[0];
-  lastHistoryTs = last ? new Date(last.at).getTime() : 0;
-}
-async function waitPartner(deadline) {
-  setStatus("Ищу партнёра рядом…");
-  while (Date.now() < deadline) {
-    const d = await getJSON("/api/history");
-    const last = (d?.history || [])[0];
-    if (last) {
-      const ts = new Date(last.at).getTime();
-      if (!lastHistoryTs || ts > lastHistoryTs) {
-        setText(partnerEl, `Вы чокнулись с ${last.withName}${last.withUsername ? ` (@${last.withUsername})` : ""}`);
-        await loadProfile();
-        await loadHistory();
-        setStatus("Готов к чок 🥂");
-        return true;
+    const stamp = toDayStamp(entry?.at);
+    if (stamp !== null) {
+      dayCounts.set(stamp, (dayCounts.get(stamp) || 0) + 1);
+      const raw = new Date(entry.at).getTime();
+      if (!Number.isNaN(raw)) {
+        latest = Math.max(latest, raw);
       }
+    } });
+
+  const todayStamp = toDayStamp(Date.now());
+  let streak = 0;
+  if (todayStamp !== null) {
+    let cursor = todayStamp;
+    while (dayCounts.has(cursor)) {
+      streak += 1;
+      cursor -= DAY_MS;
+    }
+    }
+
+  const todayCount = todayStamp !== null ? (dayCounts.get(todayStamp) || 0) : 0;
+
+  const xp = total * 25 + uniquePartners.size * 20 + streak * 30;
+
+  return {
+    total,
+    unique: uniquePartners.size,
+    streak,
+    todayCount,
+    xp,
+    latest,
+  };
+}
+function resolveLevel(xp) {
+  let current = LEVELS[0];
+  let next = LEVELS[LEVELS.length - 1];
+  for (let i = 0; i < LEVELS.length; i += 1) {
+    const lvl = LEVELS[i];
+    if (xp >= lvl.xp) {
+      current = lvl;
+      next = LEVELS[Math.min(i + 1, LEVELS.length - 1)];
+    } else {
+       next = lvl;
+      break;
+    }
+    }
+
+  const sameLevel = next.level === current.level;
+  const span = sameLevel ? Math.max(1, current.xp || 1) : Math.max(1, next.xp - current.xp);
+  const progress = sameLevel
+    ? 1
+    : Math.min(1, Math.max(0, (xp - current.xp) / span));
+
+  return {
+    current,
+    next,
+    progress,
+  };
+}
+function renderQuests(stats) {
+  if (!els.questList) return;
+  const quests = [
+    {
+      id: "daily",
+      label: "Чокнись сегодня",
+      progress: Math.min(1, stats.todayCount / 1),
+      current: stats.todayCount,
+      target: 1,
+    },
+    {
+      id: "friends",
+      label: "Познакомься с 5 друзьями",
+      progress: Math.min(1, stats.unique / 5),
+      current: stats.unique,
+      target: 5,
+    },
+    {
+      id: "streak",
+      label: "Держи серию 3 дня",
+      progress: Math.min(1, stats.streak / 3),
+      current: stats.streak,
+      target: 3,
+    },
+  ];
+
+  els.questList.innerHTML = "";
+  quests.forEach((quest) => {
+    const li = document.createElement("li");
+    li.className = "quest";
+    li.dataset.questId = quest.id;
+    const pct = Math.round(quest.progress * 100);
+    li.innerHTML = `
+      <div class="quest-meta">
+        <span class="quest-name">${quest.label}</span>
+        <span class="quest-progress">${Math.min(quest.current, quest.target)} / ${quest.target}</span>
+      </div>
+      <div class="quest-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
+        <div class="quest-fill" style="width:${pct}%"></div>
+      </div>
+    `;
+    if (quest.progress >= 1) {
+      li.classList.add("quest-done");
+    }
+    els.questList.appendChild(li);
+  });
+}
+function updateGamification(history = []) {
+  const stats = computeStats(history);
+  const level = resolveLevel(stats.xp);
+
+  if (els.levelLabel) {
+    els.levelLabel.textContent = `LVL ${level.current.level}`;
+  }
+  if (els.titleLabel) {
+    els.titleLabel.textContent = level.current.title;
+  }
+  if (els.xpLabel) {
+    if (level.next.level === level.current.level) {
+      els.xpLabel.textContent = `${stats.xp} XP`;
+    } else {
+      els.xpLabel.textContent = `${stats.xp} / ${level.next.xp} XP`;
+    }
+    }
+  if (els.streakLabel) {
+    els.streakLabel.textContent = `🔥 ${stats.streak}`;
+  }
+  if (els.xpFill) {
+    const pct = Math.round(level.progress * 100);
+    els.xpFill.style.width = `${pct}%`;
+  }
+  if (els.xpBar) {
+    els.xpBar.setAttribute("aria-valuenow", String(Math.round(level.progress * 100)));
+  }
+
+  renderQuests(stats);
+}
+function setStatus(text) {
+  if (els.status) {
+    els.status.textContent = text || "";
+  }
+}
+function setPartner(text) {
+  if (els.partner) {
+    els.partner.textContent = text || "";
+  }
+}
+
+const DEFAULT_DROP_SHADOW = "drop-shadow(0 12px 18px rgba(0,0,0,0.45))";
+
+function applyDesign(design) {
+  const normalized = DESIGN_ASSETS[design]
+    ? design
+    : (DESIGN_ALIASES[design] || "efes");
+  const cfg = DESIGN_ASSETS[normalized] || DESIGN_ASSETS.efes;
+  state.selectedDesign = normalized;
+  if (els.bottle) {
+    if (cfg.src && els.bottle.getAttribute("src") !== cfg.src) {
+      els.bottle.setAttribute("src", cfg.src);
+    }
+    const filters = [];
+    if (cfg.filter && cfg.filter !== "none") {
+      filters.push(cfg.filter);
+    }
+    filters.push(DEFAULT_DROP_SHADOW);
+    els.bottle.style.filter = filters.join(" ");
+  }
+  if (els.designOptions) {
+    [...els.designOptions.querySelectorAll(".design-card")].forEach(card => {
+      card.classList.toggle("selected", card.dataset.design === normalized);
+    });
+  }
+  if (cfg.theme) {
+    applyTheme(cfg.theme);
+    if (els.themeSelect) {
+      els.themeSelect.value = cfg.theme;
+    }
+  }
+}
+function applyTheme(name) {
+  const themeName = THEMES[name] ? name : "efes";
+  const cls = THEMES[themeName];
+  document.body.classList.remove(...Object.values(THEMES));
+  document.body.classList.add(cls);
+  const bg = THEME_BACKGROUNDS[themeName] || THEME_BACKGROUNDS.efes;
+  document.body.style.setProperty("--bg-img", bg);
+  if (els.card) {
+    els.card.style.setProperty("--bg-img", bg);
+  }
+  try {
+    localStorage.setItem("efes_theme", themeName);
+  } catch (_) {}
+}
+async function requestJSON(path, options = {}) {
+  const headers = options.headers ? { ...options.headers } : {};
+  if (tg?.initData) {
+    headers["Authorization"] = tg.initData;
+  }
+  const response = await fetch(API_BASE + path, {
+    method: options.method || "GET",
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(data?.message || "Request failed");
+    error.response = data;
+    throw error;
+  }
+  return data;
+}
+function showCountdown(show, seconds = 0) {
+  if (!els.shakeTimer || !els.shakeCountdown) return;
+  if (!show) {
+    els.shakeTimer.hidden = true;
+    els.shakeCountdown.textContent = "0";
+    return;
+  }
+  els.shakeTimer.hidden = false;
+  els.shakeCountdown.textContent = String(seconds);
+}
+function startCountdown(durationMs) {
+  clearInterval(state.countdownTimer);
+  const end = Date.now() + durationMs;
+  state.countdownEndsAt = end;
+  showCountdown(true, Math.ceil(durationMs / 1000));
+
+  state.countdownTimer = setInterval(() => {
+    const remaining = Math.max(0, state.countdownEndsAt - Date.now());
+    const seconds = Math.ceil(remaining / 1000);
+    if (seconds <= 0) {
+      stopCountdown();
+      if (state.listening) {
+        state.listening = false;
+        setStatus("Время вышло — попробуй ещё раз");
+      }
+    } else if (els.shakeCountdown) {
+      els.shakeCountdown.textContent = String(seconds);
+    }
+  }, 200);
+}
+
+function stopCountdown() {
+  clearInterval(state.countdownTimer);
+  state.countdownTimer = null;
+  state.countdownEndsAt = 0;
+  showCountdown(false);
+}
+
+async function saveProfilePayload(payload) {
+  try {
+    return await requestJSON("/api/profile/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
+  } catch (error) {
+    try {
+      return await requestJSON("/api/profile/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          name: payload.name,
+          age21: payload.age ? payload.age >= 21 : undefined,
+          mood: payload.mood,
+          contact: payload.contact,
+        },
+      });
+    } catch (_) {
+      throw error;
+    }
+  }
+}
+
+async function saveDesignPayload(design) {
+  try {
+    return await requestJSON("/api/profile/design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { design },
+    });
+  } catch (error) {
+    try {
+      return await requestJSON("/api/save_design", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { design },
+      });
+    } catch (_) {
+      throw error;
+    }
+  }
+}
+
+function animateBottle() {
+  [els.bottle, els.cap, els.foam].forEach(el => {
+    if (!el) return;
+    el.classList.remove("growshake", "pop", "spray");
+    void el.offsetWidth;
+  });
+  els.bottle?.classList.add("growshake");
+  els.cap?.classList.add("pop");
+  els.foam?.classList.add("spray");
+  document.getElementById("sfx-bottle")?.play?.();
+}
+async function ensureMotionPermission() {
+  try { if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+      const status = await DeviceMotionEvent.requestPermission();
+      return status === "granted";
+    }
+    return true; } catch (_) {
+    return false;
+  }
+}
+function onMotion(event) {
+  if (!state.listening) return;
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
+  const magnitude = Math.hypot(acc.x || 0, acc.y || 0, acc.z || 0);
+  if (magnitude > 18) {
+    handleShake();
+  }
+}
+
+async function snapshotHistory() {
+  try {
+    const data = await requestJSON("/api/history");
+    const last = data?.history?.[0];
+    state.lastHistoryTimestamp = last ? new Date(last.at).getTime() : 0;
+  } catch (error) {
+    console.warn("snapshotHistory", error);
+  }
+}
+
+async function waitForPartner(deadline) {
+  setStatus("Ищу партнёра рядом…");
+  while (Date.now() < deadline) { try {
+      const data = await requestJSON("/api/history");
+      const last = data?.history?.[0];
+      if (last) {
+        const ts = new Date(last.at).getTime();
+        if (!state.lastHistoryTimestamp || ts > state.lastHistoryTimestamp) {
+          renderPartner(last);
+          await loadProfile();
+          await loadHistory();
+          setStatus("Готов к чок 🥂");
+          return true;
+        }
+      }
+    } catch (error) {
+      console.warn("waitForPartner", error);
     }
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;
 }
-
-async function onShake() {
-  listening = false;
-  anim();
+async function handleShake() {
+  if (!state.listening) return;
+  state.listening = false;
+  stopCountdown();
+  animateBottle();
   setStatus("Чокаемся…");
 
   await snapshotHistory();
-
-  const r = await postJSON("/api/shake", {});
-  // поддержка "старого" ответа (partner/score), и "нового" (other, already_today, waiting)
-  if (r?.status === "matched" && r.other) {
-    setText(partnerEl, `Вы чокнулись с ${r.other.name}${r.other.username ? ` (@${r.other.username})` : ""}`);
-    await loadProfile();
-    await loadHistory();
-    setStatus("Готов к чок 🥂");
-    return;
-  }
-  if (r?.partner) { // старый формат
-    setText(partnerEl, `Вы чокнулись с ${r.partner.name || "Гость"}`);
-    await loadProfile();
-    await loadHistory();
-    setStatus("Готов к чок 🥂");
-    return;
-  }
-  if (r?.status === "already_today") {
-    setStatus("С этой парой уже был чок сегодня");
-    return;
-  }
-  if (r?.status === "need_profile") {
-    setStatus("Заполни анкету (нужно подтвердить 21+)");
-    return;
-  }
-  // waiting → ждём второго до 12 сек
-  const ok = await waitPartner(Date.now() + 12000);
-  if (!ok) {
-    setText(partnerEl, "");
-    setStatus("Никого рядом. Попробуй ещё раз");
+   try {
+    const result = await requestJSON("/api/shake", { method: "POST" });
+    if (result?.status === "matched" && result.other) {
+      renderPartner(result.other);
+      await loadProfile();
+      await loadHistory();
+      setStatus("Готов к чок 🥂");
+      return;
+    }
+    if (result?.partner) {
+      renderPartner(result.partner);
+      await loadProfile();
+      await loadHistory();
+      setStatus("Готов к чок 🥂");
+      return;
+    }
+    if (result?.status === "already_today") {
+      setStatus("С этой парой сегодня уже чокались");
+      return;
+    }
+    if (result?.status === "need_profile") {
+      setStatus("Заполни анкету, чтобы чокнуться");
+      showEdit(true);
+      return;
+    }
+    const partnerJoined = await waitForPartner(Date.now() + 12000);
+    if (!partnerJoined) {
+      setPartner("");
+      setStatus("Никого рядом. Попробуй ещё раз");
+    }
+  } catch (error) {
+    console.error("handleShake", error);
+    setStatus("Не удалось отправить чок, проверь сеть");
   }
 }
 
-async function startListen() {
-  const ok = await ensureMotionPermission();
-  if (!ok) { setStatus("Разреши доступ к датчикам движения"); return; }
-  setStatus("Встряхни!");
-  listening = true;
-  clearTimeout(listenTimer);
-  listenTimer = setTimeout(() => {
-    listening = false;
-    setStatus("Время вышло");
-  }, 12000);
+async function startListening() {
+  if (state.listening) return;
+  const granted = await ensureMotionPermission();
+  if (!granted) {
+    setStatus("Разреши доступ к датчикам движения");
+    return;
+  }
+  state.listening = true;
+  startCountdown(12000);
+  setStatus("Встряхни телефон!");
 }
 
-window.addEventListener("devicemotion", (ev) => {
-  if (!listening) return;
-  if (mag(ev.accelerationIncludingGravity) > 30) onShake();
-}, { passive: true });
+function stopListening() {
+  state.listening = false;
+  stopCountdown();
+}
 
-if (shakeBtn) on(shakeBtn, "click", startListen);
+async function loadProfile() {
+  try {
+    const data = await requestJSON("/api/profile/me");
+    const profile = data?.profile || null;
+    state.profile = profile;
+    if (!profile) {
+      setPartner("");
+      if (els.fillInChatBtn) {
+        els.fillInChatBtn.style.display = "";
+      }
+      return;
+    }
 
-// ===== первичная загрузка =====
-loadProfile();
-loadHistory();
-setStatus("Готов к чок 🥂");
+    if (els.fillInChatBtn) {
+      els.fillInChatBtn.style.display = "none";
+    }
+
+    if (!tg?.initDataUnsafe?.user?.username) {
+      if (els.username) {
+        els.username.textContent = profile.name || "Гость";
+      }
+    }
+
+    if (els.nameInput && !els.nameInput.value) {
+      els.nameInput.value = profile.name || "";
+    }
+    if (els.ageInput && !els.ageInput.value) {
+      if (profile.age) {
+        els.ageInput.value = profile.age;
+      } else if (typeof profile.age21 === "boolean") {
+        els.ageInput.value = profile.age21 ? 21 : 20;
+      }
+    }
+    if (els.moodInput && !els.moodInput.value) {
+      els.moodInput.value = profile.mood || "";
+    }
+    if (els.contactInput && !els.contactInput.value && profile.contact) {
+      els.contactInput.value = profile.contact;
+    }
+
+    const design = profile.design || state.selectedDesign;
+    applyDesign(design);
+    if (els.designSection) {
+      els.designSection.style.display = "block";
+    }
+  } catch (error) {
+    console.warn("loadProfile", error);
+  }
+}
+
+function renderPartner(partner) {
+  if (!partner) {
+    setPartner("");
+    return;
+  }
+   if (partner.withName || partner.withUsername) {
+    const name = partner.withName || partner.name || "Гость";
+    const username = partner.withUsername || partner.username;
+    setPartner(`Вы чокнулись с ${name}${username ? ` (@${username})` : ""}`);
+  } else {
+    const name = partner.name || "Гость";
+    const username = partner.username ? ` (@${partner.username})` : "";
+    setPartner(`Вы чокнулись с ${name}${username}`);
+  }
+}
+
+async function loadHistory() {
+  if (!els.historyList) return;
+  try {
+    const data = await requestJSON("/api/history");
+    const history = data?.history || [];
+    els.historyList.innerHTML = "";
+    history.forEach(entry => {
+      const li = document.createElement("li");
+      const username = entry.withUsername ? ` (@${entry.withUsername})` : "";
+      const when = entry.at ? new Date(entry.at).toLocaleString() : "";
+      li.textContent = `${entry.withName}${username}${when ? ` — ${when}` : ""}`;
+      els.historyList.appendChild(li);
+    });
+    updateGamification(history);
+  } catch (error) {
+    console.warn("loadHistory", error);
+    updateGamification([]);
+  }
+}
+
+function showEdit(visible) {
+  if (els.editBlock) {
+    els.editBlock.hidden = !visible;
+  }
+}
+
+async function saveProfile() {
+  if (!els.nameInput || !els.ageInput || !els.moodInput || !els.contactInput) return;
+  const payload = {
+    name: els.nameInput.value.trim(),
+    age: Number(els.ageInput.value) || undefined,
+    mood: els.moodInput.value.trim(),
+    contact: els.contactInput.value.trim(),
+    design: state.selectedDesign,
+  };
+
+  if (!payload.name) {
+    setStatus("Имя обязательно");
+    return;
+  }
+   return;
+  }
+  
+  try {
+    const result = await saveProfilePayload(payload);
+    if (result?.ok || result?.profile) {
+      setStatus("Анкета обновлена ✅");
+      showEdit(false);
+      els.fillInChatBtn && (els.fillInChatBtn.style.display = "none");
+      await loadProfile();
+    }
+  } catch (error) {
+    console.error("saveProfile", error);
+    setStatus("Не удалось сохранить анкету");
+  }
+
+async function saveDesign() {
+  try {
+    const result = await saveDesignPayload(state.selectedDesign);
+    if (result?.ok || result?.profile) {
+      setStatus("Дизайн сохранён ✨");
+      await loadProfile();
+    }
+  } catch (error) {
+    console.warn("saveDesign", error);
+    setStatus("Не удалось сохранить дизайн");
+  }
+}
+
+function openBot() {
+  if (BOT_USERNAME) {
+    window.location.href = `https://t.me/${BOT_USERNAME}`;
+  }
+}
+function initDesignCards() {
+  if (!els.designOptions) return;
+  els.designOptions.querySelectorAll(".design-card").forEach(card => {
+    card.addEventListener("click", () => {
+      applyDesign(card.dataset.design || "efes");
+    });
+  });
+  applyDesign(state.selectedDesign);
+}
+function initThemeSelect() {
+  if (!els.themeSelect) return;
+  let saved = null;
+  try {
+    saved = localStorage.getItem("efes_theme");
+  } catch (_) {}
+  const initial = saved && (THEMES[saved] || DESIGN_ALIASES[saved])
+    ? (DESIGN_ASSETS[saved] ? saved : DESIGN_ALIASES[saved])
+    : "efes";
+  applyDesign(initial);
+  els.themeSelect.value = initial;
+  els.themeSelect.addEventListener("change", (event) => {
+    const value = event.target.value;
+    applyDesign(value);
+  });
+}
+
+function initUsername() {
+  const user = tg?.initDataUnsafe?.user;
+  if (user && els.username) {
+    if (user.username) {
+      els.username.textContent = `@${user.username}`;
+    } else {
+      const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+      els.username.textContent = name || "Гость";
+    }
+  }
+}
+
+function initButtons() {
+  els.editBtn?.addEventListener("click", () => {
+    if (els.fillInChatBtn && els.fillInChatBtn.style.display !== "none") {
+      openBot();
+    } else {
+      showEdit(true);
+    }
+  });
+
+  els.cancelEditBtn?.addEventListener("click", () => {
+    showEdit(false);
+  });
+
+  els.saveProfileBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    saveProfile();
+  });
+
+  els.fillInChatBtn?.addEventListener("click", openBot);
+
+  els.friendsBtn?.addEventListener("click", async () => {
+    await loadHistory();
+    setStatus("Показана история чоков 📜");
+  });
+
+  els.saveDesignBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    saveDesign();
+  });
+
+  els.openFromBotBtn?.addEventListener("click", openBot);
+
+  if (els.shakeBtn) {
+    els.shakeBtn.addEventListener("click", startListening);
+  }
+}
+
+function initMotionListener() {
+  window.addEventListener("devicemotion", onMotion, { passive: true });
+}
+
+async function init() {
+  initUsername();
+  initThemeSelect();
+  initDesignCards();
+  initButtons();
+  initMotionListener();
+
+  await loadProfile();
+  updateGamification([]);
+  await loadHistory();
+  setStatus("Готов к чок 🥂");
+}
+init();

@@ -10,114 +10,134 @@
 
   <!-- Основные стили -->
   <link rel="stylesheet" href="style.css">
-
-  <!-- Небольшие стили для карточек выбора дизайна -->
-  <style>
-    .design-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:8px; }
-    .design-card { padding:10px; border:1px solid #d3d8e0; border-radius:10px; text-align:center; cursor:pointer; background:rgba(255,255,255,.06); color:#fff; }
-    .design-card.selected { outline:2px solid #ffd700; border-color:#ffd700; }
-    .hint { font-size:12px; opacity:.9; }
-  </style>
 </head>
 
 <!-- Стартуем с темы EFES -->
 <body class="theme-efes">
-  <div class="card">
-    <h1>🍺 Efes Club Card</h1>
+   <main class="app-shell">
+    <section class="card">
+      <header class="card-header">
+        <div class="title-group">
+          <p class="brand-tag">Efes Club Card</p>
+          <h1>Чок!</h1>
+        </div>
+        <button class="chip" id="editBtn" type="button">Анкета</button>
+      </header>
 
-    <!-- Статус -->
-    <h2 id="username">Загрузка...</h2>
-    <p>Бонусов: <span id="score">0</span></p>
-    <p id="status">Нажми «Чок!» → тряси телефон</p>
-    <p id="partner"></p>
+      <section class="card-status">
+        <h2 id="username">Загрузка...</h2>
+        <p id="status" class="status-line">Нажми «Чок!» и встряхни телефон</p>
+        <p id="partner" class="partner-line"></p>
+        <div id="shakeTimer" class="shake-timer" hidden>
+          <span class="timer-label">Осталось</span>
+          <span id="shakeCountdown" class="timer-value">10</span>
+          <span class="timer-label">сек</span>
+        </div>
+      </section>
 
-    <!-- Бутылочка + слои эффектов -->
-    <div id="bottleWrap" class="bottle-wrap">
-      <img id="bottle" class="bottle-img" src="efes-bottle.png" alt="Efes Bottle">
-      <div id="cap" class="cap" aria-hidden="true"></div>
-      <div id="foam" class="foam" aria-hidden="true"></div>
-    </div>
+      <section class="card-gamify" aria-live="polite">
+        <div class="level-chip">
+          <span id="levelLabel" class="level-rank">LVL 1</span>
+          <span id="titleLabel" class="level-title">Новичок</span>
+        </div>
+        <div class="xp-track">
+          <div class="xp-head">
+            <span id="xpLabel">0 / 100 XP</span>
+            <span id="streakLabel" class="streak">🔥 0</span>
+          </div>
+          <div class="xp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="xpFill" class="xp-fill"></div>
+          </div>
+        </div>
+        <ul id="questList" class="quest-board"></ul>
+      </section>
 
-    <!-- ЧОК -->
-    <button class="btn" id="shakeBtn" title="1) Нажми, 2) Тряси телефон">Чок!</button>
-    <div class="hint" style="margin-top:4px;">
-      Шаги: <b>нажми «Чок!»</b> → <b>встряхни</b> в течение 10 сек.
-    </div>
+      <section class="card-bottle">
+        <div id="bottleWrap" class="bottle-wrap">
+          <img id="bottle" class="bottle-img" src="img/bottle-efes-pixel.svg" alt="Efes Bottle">
+          <div id="cap" class="cap" aria-hidden="true"></div>
+          <div id="foam" class="foam" aria-hidden="true"></div>
+        </div>
+        <button class="btn primary" id="shakeBtn" title="1) Нажми, 2) Тряси телефон">Чок!</button>
+      </section>
 
-    <!-- АНКЕТА -->
-    <section id="editBlock" hidden style="text-align:left; margin-top:14px;">
-      <h3>Редактирование анкеты</h3>
+      <section id="designSection" class="card-section">
+        <div class="section-head">
+          <h3>Дизайн бутылочки</h3>
+          <button class="chip" id="saveDesignBtn" type="button">Сохранить</button>
+        </div>
+        <div id="designOptions" class="design-grid">
+          <button class="design-card design-card--efes" data-design="efes" type="button">
+            <img src="img/bottle-efes-pixel.svg" alt="Бутылочка Efes">
+            <span>Efes</span>
+          </button>
+          <button class="design-card design-card--miller" data-design="miller" type="button">
+            <img src="img/bottle-miller-pixel.svg" alt="Бутылочка Miller">
+            <span>Miller</span>
+          </button>
+          <button class="design-card design-card--ruzka" data-design="ruzka" type="button">
+            <img src="img/beer-mug-pixel.svg" alt="Кружка свежего">
+            <span>Кружка свежего</span>
+          </button>
+          <button class="design-card design-card--medved" data-design="medved" type="button">
+            <img src="img/bottle-medved-pixel.svg" alt="Бутылочка Белый медведь">
+            <span>Белый медведь</span>
+          </button>
+        </div>
+      </section>
 
-      <label>Имя<br>
-        <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
-      </label><br><br>
+      <section id="editBlock" class="card-section" hidden>
+        <h3>Анкета</h3>
+        <label class="field">
+          <span>Имя</span>
+          <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
+        </label>
+        <label class="field">
+          <span>Возраст (21+)</span>
+          <input id="ageInput" type="number" min="21" max="120" placeholder="21" required>
+        </label>
+        <label class="field">
+          <span>Настроение</span>
+          <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
+        </label>
+        <label class="field">
+          <span>Контакт</span>
+          <input id="contactInput" type="text" placeholder="@nickname" required>
+        </label>
+        <div class="edit-actions">
+          <button class="btn primary" id="saveProfileBtn" type="button">Сохранить</button>
+          <button class="btn ghost" id="cancelEditBtn" type="button">Отменить</button>
+        </div>
+      </section>
 
-      <label>Возраст (21+)<br>
-        <input id="ageInput" type="number" min="21" max="120" placeholder="18" required>
-      </label><br><br>
+      <section class="card-section compact">
+        <div class="section-head">
+          <h3>Тема</h3>
+          <select id="themeSel">
+            <option value="efes">EFES</option>
+            <option value="miller">Miller</option>
+            <option value="ruzka">Кружка свежего</option>
+            <option value="medved">Белый медведь</option>
+          </select>
+        </div>
+      </section>
 
-      <label>Настроение<br>
-        <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
-      </label><br><br>
+      <section id="historyBox" class="card-section">
+        <h3>История</h3>
+        <ul id="historyList"></ul>
+      </section>
 
-      <label>Контакт (Telegram @username или Instagram)<br>
-        <input id="contactInput" type="text" placeholder="@nickname" required>
-      </label><br><br>
-
-      <button class="btn" id="saveProfileBtn">Сохранить</button>
-      <button class="btn" id="cancelEditBtn" style="margin-left:8px;background:#666;">Отменить</button>
+      <footer class="card-footer">
+        <div class="action-row">
+          <button class="btn ghost" id="friendsBtn" type="button">Мои знакомства</button>
+        </div>
+        <button class="btn ghost" id="fillInChatBtn" type="button" style="display:none;">Заполнить в чате</button>
+      </footer>
     </section>
-
-    <!-- ВЫБОР ДИЗАЙНА -->
-    <div id="designSection" style="display:none; margin-top:16px;">
-      <h3>Выбери дизайн бутылочки</h3>
-      <div id="designOptions" class="design-grid">
-        <div class="design-card" data-design="classic">Классическая</div>
-        <div class="design-card" data-design="fest">Праздничная</div>
-        <div class="design-card" data-design="ornament">Креативная</div>
-      </div>
-      <button class="btn" id="saveDesignBtn" style="margin-top:8px;">Выбрать</button>
-      <div class="hint" style="margin-top:6px;">
-        Или пройди <a href="/quiz" style="color:#ffd700;">тест «Какая ты бутылочка?»</a> — подберём автоматически.
-      </div>
-    </div>
-
-    <!-- Селектор 4 тем -->
-    <div class="theme-row" style="margin-top:10px;">
-      Тема:
-      <select id="themeSel">
-        <option value="efes">EFES</option>
-        <option value="miller">Miller</option>
-        <option value="ruzka">Кружка свежего</option>
-        <option value="medved">Белый медведь</option>
-      </select>
-    </div>
-
-    <!-- История чоков -->
-    <div id="historyBox" style="margin-top:12px; width:100%; text-align:left;">
-      <h3 style="margin:6px 0 4px;">История</h3>
-      <ul id="historyList" style="list-style:none; padding-left:0; margin:0; font-size:14px; opacity:0.95;"></ul>
-    </div>
-
-    <!-- Действия -->
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-      <button class="btn" id="friendsBtn">Мои знакомства</button>
-      <button class="btn" id="giftBtn">Угостить 🍺</button>
-      <a class="btn" href="/quiz" style="text-decoration:none; display:inline-block; text-align:center;">Пройти тест</a>
-      <div style="margin-top:12px;">
-        <button class="btn" id="editBtn">✏️ Редактировать анкету</button>
-        <button class="btn" id="fillInChatBtn" style="margin-left:8px; display:none;">
-          Заполнить в чате
-        </button>
-      </div>
-    </div>
-
-    <!-- Fallback-кнопка -->
-    <button id="openFromBotBtn"
-            style="display:none; background:transparent; color:#ffd700; border:1px solid #ffd70066; border-radius:10px; padding:8px 10px; margin-top:8px; cursor:pointer;">
+ <button id="openFromBotBtn" class="bot-entry" type="button" style="display:none;">
       Открыть мини-апп из бота
     </button>
-  </div>
+     </main>
 
   <!-- Адрес backend и имя бота (как было) -->
   <script>
@@ -129,54 +149,17 @@
   <audio id="sfx-bottle" preload="auto">
     <source src="bottle_open.mp3" type="audio/mpeg">
   </audio>
-  <audio id="sfx-can" preload="auto">
-    <source src="sounds/can_open.mp3" type="audio/mpeg">
-  </audio>
-
+  
   <!-- Твой основной скрипт -->
   <script src="/script2.js" defer></script>
-
-  <!-- Безопасные помощники: username + темы (не ломают твой script2.js) -->
+  <!-- Безопасный помощник: показать fallback-кнопку вне Telegram -->
   <script>
     (function() {
-      // Username из Telegram (если открыто внутри Telegram)
-      document.addEventListener('DOMContentLoaded', function () {
-        try {
-          const tg = window.Telegram?.WebApp;
-          const user = tg?.initDataUnsafe?.user;
-          if (user) {
-            document.getElementById('username').textContent =
-              user.username ? '@' + user.username : (user.first_name || 'Гость');
-          }
-        } catch (_) {}
-      });
-
-      // Если твой script2.js уже определил setTheme — используем его. Если нет — дадим свой.
-      if (typeof window.setTheme !== 'function') {
-        const THEMES = {
-          efes:   { cls: 'theme-efes',   bottle: 'img/ефес.jpg' },
-          miller: { cls: 'theme-miller', bottle: 'img/миллер.jpg' },
-          ruzka:  { cls: 'theme-ruzka',  bottle: 'img/ружка свежего.jpg' },
-          medved: { cls: 'theme-medved', bottle: 'img/медведь.jpg' },
-        };
-        window.setTheme = function(name){
-          const t = THEMES[name] || THEMES.efes;
-          document.body.className = t.cls;
-          const img = document.getElementById('bottle');
-          if (img) img.src = t.bottle;
-          try { localStorage.setItem('efes_theme', name); } catch(_) {}
-        };
-      }
-
-      // Инициализация селектора тем и восстановление выбора
-      document.addEventListener('DOMContentLoaded', function () {
-        const sel = document.getElementById('themeSel');
-        if (!sel) return;
-        let saved = null;
-        try { saved = localStorage.getItem('efes_theme'); } catch(_) {}
-        window.setTheme(saved || 'efes');
-        sel.value = saved || 'efes';
-        sel.addEventListener('change', e => window.setTheme(e.target.value));
+          document.addEventListener('DOMContentLoaded', function () {
+               const fallback = document.getElementById('openFromBotBtn');
+        if (!window.Telegram?.WebApp && fallback) {
+          fallback.style.display = 'block';
+        }
       });
     })();
   </script>
