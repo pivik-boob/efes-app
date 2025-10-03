@@ -782,41 +782,102 @@ body::after {
 }
 
 .design-card--efes {
-  --design-bg: url('img/bg-efes.jpg');
-  --bottle-body: #0f6d3a;
-  --bottle-neck: #1c8b4b;
-  --label-main: #8fd9ff;
-  --label-bottom: #1161bf;
-  --label-ring: rgba(6, 44, 96, 0.7);
+  --design-bg: ('img/эфес.jpg');
+  --pixel-art-orange {
+  width: 16px;
+  height: 40px;
+  image-rendering: pixelated;
+  background:
+    linear-gradient(#2a1809, #2a1809) 4px 38px / 8px 2px no-repeat,
+    linear-gradient(#7d420f, #7d420f) 5px 36px / 6px 2px no-repeat,
+    linear-gradient(#f2d7a1, #f2d7a1) 9px 24px / 1px 8px no-repeat,
+    linear-gradient(#dba144, #dba144) 6px 24px / 1px 8px no-repeat,
+    linear-gradient(#fff6d6, #fff6d6) 7px 24px / 2px 8px no-repeat,
+    linear-gradient(#f7d47f, #f7d47f) 6px 18px / 4px 6px no-repeat,
+    linear-gradient(#f6ce86, #f6ce86) 11px 12px / 1px 26px no-repeat,
+    linear-gradient(#a45b11, #a45b11) 4px 12px / 1px 26px no-repeat,
+    linear-gradient(#fcd267 0%, #f4b12b 50%, #c1781f 100%) 5px 12px / 6px 26px no-repeat,
+    linear-gradient(#f0ac2c, #f0ac2c) 6px 8px / 4px 4px no-repeat,
+    linear-gradient(#f2c76a, #f2c76a) 5px 4px / 6px 4px no-repeat,
+    linear-gradient(#e4b657, #e4b657) 4px 2px / 8px 2px no-repeat,
+    linear-gradient(#402108, #402108) 5px 0px / 6px 2px no-repeat;
+}
+
+
 }
 
 .design-card--miller {
-  --design-bg: url('img/bg-miller.jpg');
-  --bottle-body: #f0c556;
-  --bottle-neck: #dba63a;
-  --label-main: #121015;
-  --label-bottom: #c5212b;
-  --label-stripe: rgba(255, 211, 84, 0.85);
-  --label-ring: rgba(22, 6, 6, 0.55);
+  --design-bg: url('img/миллер.jpg');
+  --pixel-art-miller {
+  width: 16px;
+  height: 40px;
+  image-rendering: pixelated;
+  background:
+    linear-gradient(#2a1809, #2a1809) 4px 38px / 8px 2px no-repeat,
+    linear-gradient(#9c5a1a, #9c5a1a) 5px 36px / 6px 2px no-repeat,
+    linear-gradient(#2d2d2d, #2d2d2d) 7px 26px / 2px 2px no-repeat,
+    linear-gradient(#f4b12d, #f4b12d) 7px 23px / 2px 1px no-repeat,
+    linear-gradient(#c42227, #c42227) 6px 22px / 4px 2px no-repeat,
+    linear-gradient(#151515, #151515) 6px 20px / 4px 6px no-repeat,
+    linear-gradient(#ffe7ad, #ffe7ad) 11px 12px / 1px 26px no-repeat,
+    linear-gradient(#b87124, #b87124) 4px 12px / 1px 26px no-repeat,
+    linear-gradient(#fbe9a3 0%, #f1c75f 60%, #c9852c 100%) 5px 12px / 6px 26px no-repeat,
+    linear-gradient(#f6d679, #f6d679) 6px 8px / 4px 4px no-repeat,
+    linear-gradient(#ffd777, #ffd777) 5px 4px / 6px 4px no-repeat,
+    linear-gradient(#f0c75c, #f0c75c) 4px 2px / 8px 2px no-repeat,
+    linear-gradient(#402108, #402108) 5px 0px / 6px 2px no-repeat;
+}
 }
 
 .design-card--ruzka {
-  --design-bg: url('img/bg-ruzka.jpg');
-  --mug-foam: #fff5d9;
-  --mug-liquid: #f4bb45;
-  --mug-liquid-bottom: #d2871f;
-  --mug-handle: rgba(255, 249, 224, 0.95);
-  --mug-handle-shadow: rgba(175, 140, 88, 0.55);
+  --design-bg: url('img/ружка.jpg');
+  --pixel-art-ruzka {
+  width: 24px;
+  height: 32px;
+  image-rendering: pixelated;
+  background:
+    linear-gradient(#fff4cf, #fff4cf) 18px 8px / 4px 2px no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.35)) 2px 6px / 2px 20px no-repeat,
+    linear-gradient(#e5a32a, #e5a32a) 15px 10px / 2px 10px no-repeat,
+    linear-gradient(#f7bf3d, #f7bf3d) 12px 10px / 2px 10px no-repeat,
+    linear-gradient(#f9d47a, #f9d47a) 9px 10px / 2px 10px no-repeat,
+    linear-gradient(#fce8ab, #fce8ab) 6px 10px / 2px 10px no-repeat,
+    linear-gradient(#fef5dc, #fef5dc) 4px 0px / 14px 2px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 5px 2px / 12px 2px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 6px 4px / 10px 2px no-repeat,
+    linear-gradient(#e8c15c, #e8c15c) 18px 20px / 4px 2px no-repeat,
+    linear-gradient(#f7d977, #f7d977) 18px 10px / 4px 10px no-repeat,
+    linear-gradient(#9f5c12, #9f5c12) 4px 26px / 14px 2px no-repeat,
+    linear-gradient(#d98b16, #d98b16) 4px 24px / 14px 2px no-repeat,
+    linear-gradient(#f3a421, #f3a421) 4px 12px / 14px 12px no-repeat,
+    linear-gradient(#f7d977, #f7d977) 4px 8px / 14px 4px no-repeat,
+    linear-gradient(#fff4cf, #fff4cf) 4px 6px / 14px 2px no-repeat,
+    linear-gradient(#f5b733, #f5b733) 4px 6px / 14px 20px no-repeat;
+}
 }
 
 .design-card--medved {
-  --design-bg: url('img/bg-medved.jpg');
-  --bottle-body: #0f5f33;
-  --bottle-neck: #197b43;
-  --label-main: #ffffff;
-  --label-bottom: #b7d9f5;
-  --label-ring: rgba(27, 64, 85, 0.6);
-  --label-stripe: rgba(215, 242, 255, 0.95);
+  --design-bg: url('img/медведь.jpg');
+  --pixel-art-medved {
+  width: 16px;
+  height: 40px;
+  image-rendering: pixelated;
+  background:
+    linear-gradient(#0b1c10, #0b1c10) 4px 38px / 8px 2px no-repeat,
+    linear-gradient(#1c3921, #1c3921) 5px 36px / 6px 2px no-repeat,
+    linear-gradient(#13301d, #13301d) 6px 26px / 4px 2px no-repeat,
+    linear-gradient(#0c2b1a, #0c2b1a) 8px 22px / 1px 1px no-repeat,
+    linear-gradient(#e6f3ff, #e6f3ff) 7px 23px / 2px 1px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 7px 21px / 2px 2px no-repeat,
+    linear-gradient(#1f5031, #1f5031) 6px 20px / 4px 6px no-repeat,
+    linear-gradient(#63b779, #63b779) 11px 12px / 1px 26px no-repeat,
+    linear-gradient(#1b4726, #1b4726) 4px 12px / 1px 26px no-repeat,
+    linear-gradient(#3d9153 0%, #2c6c3c 60%, #1a4225 100%) 5px 12px / 6px 26px no-repeat,
+    linear-gradient(#326b3d, #326b3d) 6px 8px / 4px 4px no-repeat,
+    linear-gradient(#e0b35d, #e0b35d) 5px 4px / 6px 4px no-repeat,
+    linear-gradient(#d3a24b, #d3a24b) 4px 2px / 8px 2px no-repeat,
+    linear-gradient(#36220e, #36220e) 5px 0px / 6px 2px no-repeat;
+}
 }
 
 .card-footer {
@@ -861,7 +922,7 @@ body::after {
 /* Темы */
 body.theme-efes {
   --accent: #ffd046;
-  --bg-img: url('img/bg-efes.jpg');
+  --bg-img: url('img/эфес.jpg');
   --bg-top: rgba(32, 60, 132, 0.16);
   --bg-mid: rgba(17, 38, 95, 0.18);
   --bg-bottom: rgba(8, 24, 62, 0.22);
@@ -871,7 +932,7 @@ body.theme-efes {
 
 body.theme-miller {
   --accent: #f2e4a0;
-  --bg-img: url('img/bg-miller.jpg');
+  --bg-img: url('img/миллер.jpg');
   --bg-top: rgba(86, 73, 38, 0.14);
   --bg-mid: rgba(66, 57, 28, 0.18);
   --bg-bottom: rgba(37, 33, 17, 0.22);
@@ -881,7 +942,7 @@ body.theme-miller {
 
 body.theme-ruzka {
   --accent: #ffd6c2;
-  --bg-img: url('img/bg-ruzka.jpg');
+  --bg-img: url('img/ружка.jpg');
   --bg-top: rgba(122, 46, 54, 0.16);
   --bg-mid: rgba(92, 34, 38, 0.18);
   --bg-bottom: rgba(62, 22, 28, 0.22);
@@ -891,7 +952,7 @@ body.theme-ruzka {
 
 body.theme-medved {
   --accent: #ffecba;
-  --bg-img: url('img/bg-medved.jpg');
+  --bg-img: url('img/медведь.jpg');
   --bg-top: rgba(140, 92, 28, 0.16);
   --bg-mid: rgba(110, 68, 18, 0.18);
   --bg-bottom: rgba(74, 45, 12, 0.22);
