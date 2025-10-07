@@ -400,7 +400,7 @@ if (process.env.REDIS_URL) {
 
 // ---------- Telegram bot helpers ----------
 const START_KEYBOARD = {
-  keyboard: [[{ text: 'Старт' }], [{ text: 'Карта' }]],
+  keyboard: [[{ text: 'Карта' }]],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -487,24 +487,6 @@ async function sendGreetingAndMiniApp(message) {
   await callTelegram('sendMessage', miniAppMessage);
 }
 
-async function sendMapInfo(message) {
-  const chatId = message?.chat?.id;
-  if (!chatId) return;
-
-  const hasMap = Boolean(MAP_URL);
-  const text = hasMap
-    ? `Вот карта мероприятия: ${MAP_URL}`
-    : 'Карта пока недоступна: администратору нужно указать MAP_URL в настройках приложения.';
-
-  const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
-
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
-    text,
-    reply_markup: replyMarkup,
-    disable_web_page_preview: !hasMap,
-  });
-}
 
 async function handleTelegramUpdate(update) {
   if (!update) return;
