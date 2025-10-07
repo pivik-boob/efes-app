@@ -18,11 +18,12 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook${TELEGRAM_WEBHOOK_SECRET ? `/${TELEGRAM_WEBHOOK_SECRET}` : ''}`;
 const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
+const MAP_URL = process.env.MAP_URL || '';
 // ---------- Prisma ----------
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
-function createFileStoreClient() {
+function createFileStoreClient(reason = 'no DATABASE_URL') {
   const defaults = { profiles: {}, meetings: [] };
   let cache = null;
   let loadPromise = null;
@@ -185,18 +186,90 @@ function createFileStoreClient() {
     },
   };
 
-  console.log('Prisma: DISABLED (no DATABASE_URL). Using JSON file store at', DATA_FILE);
+console.log(`Prisma: DISABLED (${reason}). Using JSON file store at`, DATA_FILE);
 
   return { profile, meeting };
 }
 
 let prisma = null;
 let db = null;
+let dbInitPromise = Promise.resolve();
 if (process.env.DATABASE_URL) {
   prisma = new PrismaClient();
   db = prisma;
+  dbInitPromise = ensurePostgresSchema(prisma)
+    .then(() => {
+      console.log('Prisma: CONNECTED to Postgres database.');
+    })
+    .catch(async err => {
+      console.error('Prisma init failed, falling back to JSON store:', err?.message || err);
+      try {
+        await prisma.$disconnect();
+      } catch (_) {}
+      prisma = null;
+      db = createFileStoreClient('init_failed');
+    });
 } else {
-  db = createFileStoreClient();
+   db = createFileStoreClient('no DATABASE_URL');
+}
+
+async function ensurePostgresSchema(prismaClient) {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS "Profile" (
+      "userId" TEXT PRIMARY KEY,
+      "tgUsername" TEXT,
+      "name" TEXT NOT NULL,
+      "age21" BOOLEAN,
+      "age" INTEGER,
+      "instagram" TEXT,
+      "contact" TEXT,
+      "mood" TEXT DEFAULT '🙂',
+      "design" TEXT DEFAULT 'classic',
+      "photoFileId" TEXT,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS "Meeting" (
+      "id" TEXT PRIMARY KEY,
+      "userAId" TEXT NOT NULL,
+      "userBId" TEXT NOT NULL,
+      "pairKey" TEXT NOT NULL,
+      "dayKey" TEXT NOT NULL,
+      "metAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS "GiftCode" (
+      "voucher" TEXT PRIMARY KEY,
+      "fromUserId" TEXT NOT NULL,
+      "toUserId" TEXT NOT NULL,
+      "message" TEXT,
+      "redeemed" BOOLEAN NOT NULL DEFAULT false,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "expiresAt" TIMESTAMP(3)
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Meeting_pairKey_dayKey_key" ON "Meeting" ("pairKey", "dayKey")`,
+    `CREATE INDEX IF NOT EXISTS "Meeting_dayKey_idx" ON "Meeting" ("dayKey")`,
+    `CREATE INDEX IF NOT EXISTS "Meeting_userAId_metAt_idx" ON "Meeting" ("userAId", "metAt")`,
+    `CREATE INDEX IF NOT EXISTS "Meeting_userBId_metAt_idx" ON "Meeting" ("userBId", "metAt")`,
+    `CREATE INDEX IF NOT EXISTS "GiftCode_fromUserId_idx" ON "GiftCode" ("fromUserId")`,
+    `CREATE INDEX IF NOT EXISTS "GiftCode_toUserId_idx" ON "GiftCode" ("toUserId")`,
+    `DO $$ BEGIN
+        ALTER TABLE "GiftCode"
+        ADD CONSTRAINT "GiftCode_fromUserId_fkey"
+        FOREIGN KEY ("fromUserId") REFERENCES "Profile"("userId")
+        ON DELETE RESTRICT ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `DO $$ BEGIN
+        ALTER TABLE "GiftCode"
+        ADD CONSTRAINT "GiftCode_toUserId_fkey"
+        FOREIGN KEY ("toUserId") REFERENCES "Profile"("userId")
+        ON DELETE RESTRICT ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+  ];
+
+  for (const sql of statements) {
+    await prismaClient.$executeRawUnsafe(sql);
+  }
 }
 
 // ---------- Helpers: sync Telegram username (no auto-create) ----------
@@ -327,7 +400,7 @@ if (process.env.REDIS_URL) {
 
 // ---------- Telegram bot helpers ----------
 const START_KEYBOARD = {
-  keyboard: [[{ text: 'Старт' }]],
+  keyboard: [[{ text: 'Старт' }], [{ text: 'Карта' }]],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -414,6 +487,25 @@ async function sendGreetingAndMiniApp(message) {
   await callTelegram('sendMessage', miniAppMessage);
 }
 
+async function sendMapInfo(message) {
+  const chatId = message?.chat?.id;
+  if (!chatId) return;
+
+  const hasMap = Boolean(MAP_URL);
+  const text = hasMap
+    ? `Вот карта мероприятия: ${MAP_URL}`
+    : 'Карта пока недоступна: администратору нужно указать MAP_URL в настройках приложения.';
+
+  const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
+
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text,
+    reply_markup: replyMarkup,
+    disable_web_page_preview: !hasMap,
+  });
+}
+
 async function handleTelegramUpdate(update) {
   if (!update) return;
 
@@ -431,6 +523,11 @@ async function handleTelegramUpdate(update) {
 
     if (rawText === '/start' || normalized === 'старт' || normalized === 'start') {
       await sendGreetingAndMiniApp(message);
+      return;
+    }
+
+    if (rawText === '/map' || normalized === 'карта' || normalized === 'map') {
+      await sendMapInfo(message);
       return;
     }
 
@@ -484,6 +581,29 @@ async function ensureTelegramWebhook() {
     }
   } catch (err) {
     console.error('Failed to set Telegram webhook:', err?.message || err);
+  }
+}
+
+async function ensureTelegramCommands() {
+  if (!TELEGRAM_API_BASE) return;
+
+  const commands = [
+    { command: 'start', description: 'Запустить мини-приложение Эфес' },
+    { command: 'map', description: 'Показать карту EFES' },
+  ];
+
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/setMyCommands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ commands }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.error('Failed to set Telegram commands:', data.description || data);
+    }
+  } catch (err) {
+    console.error('Failed to configure Telegram commands:', err?.message || err);
   }
 }
 
@@ -569,7 +689,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
 app.get('/api/profile/me', authMiddleware, async (req, res) => {
   try {
     await syncTgUsername(req.userId, req.tgUser);
-    const p = await db.profile.findUnique({ where: { userId: req.userId } });
+    const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
         // Профиль создаётся после сохранения данных в мини-аппе
     if (!p) return res.json({ profile: null });
     res.json({ profile: p });
@@ -600,7 +720,7 @@ app.post('/api/profile/save', authMiddleware, (_req, res) => {
       const { design } = req.body || {};
       if (!design) return res.status(400).json({ ok: false, error: 'design required' });
 
-      const p = await db.profile.upsert({
+      const p = await prisma.profile.upsert({
         where: { userId },
         create: {
           userId,
@@ -663,7 +783,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
     const now = Date.now();
 
     await syncTgUsername(userId, req.tgUser);
-    const self = await db.profile.findUnique({ where: { userId } });
+    const self = await prisma.profile.findUnique({ where: { userId } });
     if (!self) return res.json({ status: 'need_profile' });
 
     const other = await popWaiting(); // пытаемся забрать ждущего
@@ -672,11 +792,11 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
       const partnerId = other.userId;
       const dayKey = computeDayKey();
       const pairKey = makePairKey(userId, partnerId);
-           const already = await db.meeting.findUnique({
+           const already = await prisma.meeting.findUnique({
         where: { pairKey_dayKey: { pairKey, dayKey } },
       });
       if (already) return res.json({ status: 'already_today' });
-      await db.meeting.create({
+      await prisma.meeting.create({
         data: {
           userAId: userId,
           userBId: partnerId,
@@ -685,7 +805,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
         },
       });
       // возвращаем данные партнёра (имя + username)
-      const partner = await db.profile.findUnique({ where: { userId: partnerId } });
+      const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
       const partnerContact = resolveProfileContact(partner);
 
       return res.json({
@@ -716,7 +836,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     const from = req.query.from ? new Date(req.query.from) : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
     const to   = req.query.to   ? new Date(req.query.to)   : (() => { const d = new Date(); d.setHours(23,59,59,999); return d; })();
 
-    const list = await db.meeting.findMany({
+    const list = await prisma.meeting.findMany({
       where: {
             metAt: { gte: from, lte: to },
         OR: [{ userAId: userId }, { userBId: userId }]
@@ -727,7 +847,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     const items = [];
     for (const m of list) {
               const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await db.profile.findUnique({ where: { userId: otherId } });
+      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
             items.push({ user_id: otherId, profile: p, at: m.metAt });
     }
     res.json({ ok: true, items });
@@ -741,7 +861,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
 app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
-    const list = await db.meeting.findMany({
+    const list = await prisma.meeting.findMany({
          where: { OR: [{ userAId: userId }, { userBId: userId }] },
       orderBy: { metAt: 'desc' },
       take: 20
@@ -749,7 +869,7 @@ app.get('/api/history', authMiddleware, async (req, res) => {
     const history = [];
     for (const m of list) {
       const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await db.profile.findUnique({ where: { userId: otherId } });
+      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
          history.push({
         withId: otherId,
         withUsername: p?.tgUsername || null,
@@ -765,10 +885,23 @@ app.get('/api/history', authMiddleware, async (req, res) => {
   }
 });
 // ---------- Start ----------
-app.listen(PORT, () => {
-  console.log(`Efes app listening on :${PORT}`);
-  if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
-  if (BOT_TOKEN) {
-       ensureTelegramWebhook();
+async function bootstrap() {
+  try {
+    await dbInitPromise;
+  } catch (err) {
+    console.error('Database initialization error:', err?.message || err);
   }
+
+    app.listen(PORT, () => {
+    console.log(`Efes app listening on :${PORT}`);
+    if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
+    if (BOT_TOKEN) {
+      ensureTelegramWebhook();
+      ensureTelegramCommands();
+    }
+  });
+}
+
+bootstrap().catch(err => {
+  console.error('Failed to launch server:', err?.message || err);
 });
