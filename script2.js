@@ -1,6 +1,10 @@
 const tg = window.Telegram?.WebApp;
 if (tg) tg.ready();
-const API_BASE = window.__API_BASE__ || "";
+const rawApiBase = (window.__API_BASE__ || "").trim();
+const fallbackApiBase = window.location && window.location.origin
+  ? window.location.origin
+  : "";
+const API_BASE = (rawApiBase || fallbackApiBase || "").replace(/\/$/, "");
 const BOT_USERNAME = window.__BOT_USERNAME__ || "";
 
 const els = {
@@ -37,7 +41,7 @@ const els = {
   moodActiveText: document.getElementById("moodActiveText"),
   moodCustomInput: document.getElementById("moodCustomInput"),
   contactInput: document.getElementById("contactInput"),
-    contactNote: document.getElementById("contactNote"),
+  contactNote: document.getElementById("contactNote"),
   contactField: document.getElementById("contactField"),
   friendsBtn: document.getElementById("friendsBtn"),
   themeSelect: document.getElementById("themeSel"),
@@ -47,11 +51,6 @@ const els = {
   designOptions: document.getElementById("designOptions"),
   saveDesignBtn: document.getElementById("saveDesignBtn"),
   openFromBotBtn: document.getElementById("openFromBotBtn"),
-  botGuide: document.getElementById("botGuide"),
-  botGuideStart: document.getElementById("botGuideStart"),
-  botGuideDialog: document.getElementById("botGuideDialog"),
-  botGuideMessages: document.getElementById("botGuideMessages"),
-  botGuideProceed: document.getElementById("botGuideProceed"),
 };
 
 const state = {
@@ -60,13 +59,11 @@ const state = {
   countdownEndsAt: 0,
   lastHistoryTimestamp: 0,
   selectedDesign: "efes",
-    profile: undefined,
-  profileRequired: false,
+  profile: undefined,
   moodOptions: [],
   moodCardRefs: [],
   moodIndex: 0,
   customMoodValue: "",
-  guideComplete: false,
   autoContact: null,
 };
 
@@ -75,13 +72,6 @@ const moodGestureState = {
   startX: 0,
   lastX: 0,
   pointerId: null,
-};
-
-const guideState = {
-  started: false,
-  finished: false,
-  timer: null,
-  index: 0,
 };
 
 const DESIGN_ASSETS = {
@@ -128,25 +118,6 @@ const THEMES = {
   ruzka: "theme-ruzka",
   medved: "theme-medved",
 };
-
-const GUIDE_MESSAGES = [
-  {
-    sender: "bot",
-    text: "Привет! Я Efes-бот и помогу разобраться, что такое Чок.",
-  },
-  {
-    sender: "bot",
-    text: "Чок — это быстрый обмен знакомствами: нажми кнопку, встряхни телефон и мы покажем, кто рядом.",
-  },
-  {
-    sender: "bot",
-    text: "Чтобы всё сработало, заполни анкету прямо в мини-аппе и выбери свою пиксельную бутылочку.",
-  },
-  {
-    sender: "bot",
-    text: "Готов? Жми «Перейти к анкете» ниже и создавай свой вайб!",
-  },
-];
 
 const THEME_BACKGROUNDS = {
   efes: [
@@ -233,95 +204,6 @@ function getFallbackBackground(theme) {
   }
   const fallback = getBackgroundCandidates("efes");
   return fallback[0] || "";
-}
-
-function clearGuideTimer() {
-  if (guideState.timer) {
-    clearTimeout(guideState.timer);
-    guideState.timer = null;
-  }
-}
-
-function appendGuideMessage(message) {
-  if (!els.botGuideMessages || !message) return;
-  const li = document.createElement("li");
-  li.className = `bot-message bot-message--${message.sender || "bot"}`;
-  li.textContent = message.text || "";
-  els.botGuideMessages.appendChild(li);
-  if (typeof els.botGuideMessages.scrollTo === "function") {
-    els.botGuideMessages.scrollTo({
-      top: els.botGuideMessages.scrollHeight,
-      behavior: "smooth",
-    });
-  } else {
-    els.botGuideMessages.scrollTop = els.botGuideMessages.scrollHeight;
-  }
-}
-
-function playGuideStep(index) {
-  if (!GUIDE_MESSAGES[index]) {
-    finishGuideConversation();
-    return;
-  }
-  const delay = index === 0 ? 350 : 1100;
-  guideState.timer = setTimeout(() => {
-    appendGuideMessage(GUIDE_MESSAGES[index]);
-    guideState.index = index + 1;
-    playGuideStep(index + 1);
-  }, delay);
-}
-
-function startGuideConversation() {
-  if (!els.botGuide) return;
-  clearGuideTimer();
-  guideState.started = true;
-  guideState.finished = false;
-  guideState.index = 0;
-  if (els.botGuideMessages) {
-    els.botGuideMessages.innerHTML = "";
-  }
-  if (els.botGuideStart) {
-    els.botGuideStart.hidden = true;
-  }
-  if (els.botGuideDialog) {
-    els.botGuideDialog.hidden = false;
-  }
-  if (els.botGuideProceed) {
-    els.botGuideProceed.hidden = true;
-  }
-  appendGuideMessage({ sender: "user", text: "Старт" });
-  playGuideStep(0);
-  updateGuideVisibility();
-}
-
-function finishGuideConversation() {
-  clearGuideTimer();
-  guideState.finished = true;
-  if (els.botGuideProceed) {
-    els.botGuideProceed.hidden = false;
-  }
-  updateGuideVisibility();
-}
-
-function updateGuideVisibility() {
-  if (!els.botGuide) return;
-  const requireProfile = state.profileRequired && !state.profile;
-  if (!requireProfile || state.guideComplete) {
-    els.botGuide.dataset.state = "done";
-    els.botGuide.setAttribute("hidden", "hidden");
-    return;
-  }
-  els.botGuide.dataset.state = guideState.started ? "open" : "intro";
-  els.botGuide.removeAttribute("hidden");
-  if (els.botGuideStart) {
-    els.botGuideStart.hidden = guideState.started;
-  }
-  if (els.botGuideDialog) {
-    els.botGuideDialog.hidden = !guideState.started;
-  }
-  if (els.botGuideProceed) {
-    els.botGuideProceed.hidden = !guideState.finished;
-  }
 }
 
 function toCssUrl(path) {
@@ -453,6 +335,21 @@ function renderMoodOptions() {
   });
 }
 
+function updateMoodTransform(extraOffsetPx = 0) {
+  if (!els.moodTrack) return;
+  const width = els.moodWindow?.clientWidth || 0;
+  if (width > 1) {
+    const base = -state.moodIndex * width;
+    const total = base + extraOffsetPx;
+    els.moodTrack.style.transform = `translateX(${total}px)`;
+  } else {
+    const percentBase = -state.moodIndex * 100;
+    const extraPercent = width > 0 ? (extraOffsetPx / width) * 100 : 0;
+    const value = percentBase + extraPercent;
+    els.moodTrack.style.transform = `translateX(${value}%)`;
+  }
+}
+
 function findMoodIndexByValue(value) {
   if (!value) return -1;
   const normalized = value.trim().toLowerCase();
@@ -464,8 +361,7 @@ function setMoodIndex(index, options = {}) {
   const length = state.moodOptions.length;
   const target = ((index % length) + length) % length;
   state.moodIndex = target;
-  const offset = -target * 100;
-  els.moodTrack.style.setProperty("--offset", `${offset}%`);
+  updateMoodTransform();
   if (els.moodCarousel) {
     els.moodCarousel.dataset.index = String(target);
   }
@@ -592,10 +488,8 @@ function initMoodGestures() {
   const onPointerMove = (event) => {
     if (!moodGestureState.active || event.pointerId !== moodGestureState.pointerId) return;
     moodGestureState.lastX = event.clientX;
-    const width = els.moodWindow.clientWidth || 1;
     const delta = moodGestureState.lastX - moodGestureState.startX;
-    const percent = (delta / width) * 100;
-    els.moodTrack.style.setProperty("--offset", `calc(${ -state.moodIndex * 100 }% + ${percent}%)`);
+    updateMoodTransform(delta);
   };
 
   const finishGesture = (event) => {
@@ -638,13 +532,18 @@ function initMoodCarousel() {
   renderMoodOptions();
   updateCustomCard(state.customMoodValue);
   setMoodIndex(0);
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => updateMoodTransform());
+} else {
+  setTimeout(() => updateMoodTransform(), 0);
+  }
   els.moodPrev?.addEventListener("click", () => handleMoodNav(-1));
   els.moodNext?.addEventListener("click", () => handleMoodNav(1));
   els.moodCustomInput?.addEventListener("input", handleMoodCustomInput);
   els.moodCustomInput?.addEventListener("change", handleMoodCustomInput);
   initMoodGestures();
+  window.addEventListener("resize", () => updateMoodTransform());
 }
-
 function updateDesignCardBackgrounds() {
   if (!els.designOptions) return;
   [...els.designOptions.querySelectorAll(".design-card")].forEach((card) => {
@@ -1034,10 +933,18 @@ async function requestJSON(path, options = {}) {
   if (tg?.initData) {
     headers["Authorization"] = tg.initData;
   }
+    headers["Accept"] = headers["Accept"] || "application/json";
+  const body = options.body
+    ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body))
+    : undefined;
+  if (body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(API_BASE + path, {
     method: options.method || "GET",
     headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body,
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -1269,18 +1176,18 @@ async function loadProfile() {
     const data = await requestJSON("/api/profile/me");
     const profile = data?.profile || null;
     state.profile = profile;
-    state.profileRequired = !profile;
-    if (profile) {
-      state.guideComplete = true;
-    }
     applyContactAutofill(profile);
     if (els.editBtn) {
       els.editBtn.dataset.required = profile ? "false" : "true";
+     if (profile) {
+        els.editBtn.hidden = true;
+      } else {
+        els.editBtn.hidden = false;
+      } 
     }
     if (els.shakeBtn) {
       els.shakeBtn.disabled = !profile;
     }
-    updateGuideVisibility();
     updateUsernameDisplay(profile);
     if (!profile) {
       setPartner("");
@@ -1322,14 +1229,13 @@ async function loadProfile() {
     console.warn("loadProfile", error);
     if (state.profile === undefined) {
       state.profile = null;
-      state.profileRequired = true;
       if (els.editBtn) {
         els.editBtn.dataset.required = "true";
+        els.editBtn.hidden = false;
       }
       if (els.shakeBtn) {
         els.shakeBtn.disabled = true;
       }
-      updateGuideVisibility();
       showEdit(true);
     }
     applyContactAutofill(null);
@@ -1580,23 +1486,6 @@ function initUsername() {
   updateUsernameDisplay(state.profile);
 }
 
-function initBotGuide() {
-  updateGuideVisibility();
-  els.botGuideStart?.addEventListener("click", () => {
-    startGuideConversation();
-  });
-  els.botGuideProceed?.addEventListener("click", () => {
-    if (!guideState.finished) {
-      finishGuideConversation();
-    }
-    if (typeof (tg?.HapticFeedback?.impactOccurred) === "function") {
-      tg.HapticFeedback.impactOccurred("medium");
-    }
-    showEdit(true);
-    els.nameInput?.focus();
-  });
-}
-
 function initButtons() {
   els.editBtn?.addEventListener("click", () => {
        if (state.profile === null) {
@@ -1646,7 +1535,6 @@ async function init() {
   applyContactAutofill(null);
   showEdit(false);
   primeBackgrounds();
-  initBotGuide();
   initButtons();
   initMotionListener();
 

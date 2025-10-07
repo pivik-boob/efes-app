@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 const bodyParser = require('body-parser');
 const { PrismaClient } = require('@prisma/client');
 
@@ -18,7 +19,185 @@ const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook${TELEGRAM_WEBHOOK_SECRET ? `/${TELEGRAM_WEBHOOK_SECRET}` : ''}`;
 const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
 // ---------- Prisma ----------
-const prisma = new PrismaClient();
+const DATA_DIR = path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'store.json');
+
+function createFileStoreClient() {
+  const defaults = { profiles: {}, meetings: [] };
+  let cache = null;
+  let loadPromise = null;
+  let writeChain = Promise.resolve();
+
+  async function ensureLoaded() {
+    if (cache) return cache;
+    if (!loadPromise) {
+      loadPromise = (async () => {
+        try {
+          const raw = await fs.promises.readFile(DATA_FILE, 'utf8');
+          const parsed = JSON.parse(raw);
+          cache = {
+            profiles: parsed?.profiles && typeof parsed.profiles === 'object'
+              ? { ...parsed.profiles }
+              : { ...defaults.profiles },
+            meetings: Array.isArray(parsed?.meetings)
+              ? parsed.meetings.map(item => ({ ...item }))
+              : [...defaults.meetings],
+          };
+        } catch (err) {
+          if (err && err.code !== 'ENOENT') {
+            console.warn('Local store load failed, starting empty:', err.message || err);
+          }
+          cache = { profiles: { ...defaults.profiles }, meetings: [...defaults.meetings] };
+        }
+        return cache;
+      })();
+    }
+    return loadPromise;
+  }
+
+  async function persist() {
+    try {
+      await fs.promises.mkdir(DATA_DIR, { recursive: true });
+      await fs.promises.writeFile(
+        DATA_FILE,
+        JSON.stringify(cache, null, 2),
+        'utf8',
+      );
+    } catch (err) {
+      console.error('Local store persist failed:', err?.message || err);
+    }
+  }
+
+  function withWrite(fn) {
+    const task = writeChain.then(async () => {
+      await ensureLoaded();
+      const result = await fn();
+      await persist();
+      return result;
+    });
+    writeChain = task.catch(() => {});
+    return task;
+  }
+
+  const profile = {
+    async findUnique({ where }) {
+      if (!where?.userId) return null;
+      const store = await ensureLoaded();
+      const profile = store.profiles[where.userId];
+      return profile ? { ...profile } : null;
+    },
+    async update({ where, data }) {
+      if (!where?.userId) throw new Error('userId is required');
+      return withWrite(async () => {
+        const store = await ensureLoaded();
+        const existing = store.profiles[where.userId];
+        if (!existing) throw new Error('Profile not found');
+        const updated = {
+          ...existing,
+          ...data,
+          userId: where.userId,
+          updatedAt: new Date().toISOString(),
+        };
+        store.profiles[where.userId] = updated;
+        return { ...updated };
+      });
+    },
+    async create({ data }) {
+      const userId = data?.userId;
+      if (!userId) throw new Error('userId is required');
+      return withWrite(async () => {
+        const store = await ensureLoaded();
+        const created = {
+          ...data,
+          userId,
+          updatedAt: new Date().toISOString(),
+        };
+        store.profiles[userId] = created;
+        return { ...created };
+      });
+    },
+    async upsert({ where, create, update }) {
+      const userId = where?.userId;
+      if (!userId) throw new Error('userId is required');
+      const existing = await this.findUnique({ where: { userId } });
+      if (existing) {
+        return this.update({ where: { userId }, data: update });
+      }
+      return this.create({ data: { userId, ...create } });
+    },
+  };
+
+  const meeting = {
+    async findUnique({ where }) {
+      const key = where?.pairKey_dayKey;
+      if (!key?.pairKey || !key?.dayKey) return null;
+      const store = await ensureLoaded();
+      const match = store.meetings.find(
+        item => item.pairKey === key.pairKey && item.dayKey === key.dayKey,
+      );
+      return match ? { ...match } : null;
+    },
+    async create({ data }) {
+      return withWrite(async () => {
+        const store = await ensureLoaded();
+        const record = {
+          id: data?.id || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
+          userAId: data?.userAId,
+          userBId: data?.userBId,
+          pairKey: data?.pairKey,
+          dayKey: data?.dayKey,
+          metAt: data?.metAt || new Date().toISOString(),
+        };
+        store.meetings.push(record);
+        return { ...record };
+      });
+    },
+    async findMany({ where = {}, orderBy, take }) {
+      const store = await ensureLoaded();
+      const list = store.meetings
+        .filter(item => {
+          const when = new Date(item.metAt || item.met_at || Date.now());
+          if (where.metAt?.gte && when < where.metAt.gte) return false;
+          if (where.metAt?.lte && when > where.metAt.lte) return false;
+          if (Array.isArray(where.OR) && where.OR.length) {
+            return where.OR.some(cond => {
+              if (cond.userAId && item.userAId === cond.userAId) return true;
+              if (cond.userBId && item.userBId === cond.userBId) return true;
+              return false;
+            });
+          }
+          if (where.userAId && item.userAId !== where.userAId) return false;
+          if (where.userBId && item.userBId !== where.userBId) return false;
+          return true;
+        })
+        .map(entry => ({ ...entry }));
+
+      if (orderBy?.metAt === 'desc') {
+        list.sort((a, b) => new Date(b.metAt) - new Date(a.metAt));
+      } else if (orderBy?.metAt === 'asc') {
+        list.sort((a, b) => new Date(a.metAt) - new Date(b.metAt));
+      }
+
+      if (typeof take === 'number') {
+        return list.slice(0, take);
+      }
+      return list;
+    },
+  };
+
+  console.log('Prisma: DISABLED (no DATABASE_URL). Using JSON file store at', DATA_FILE);
+
+  return { profile, meeting };
+}
+
+let prisma = null;
+let db = null;
+if (process.env.DATABASE_URL) {
+  prisma = new PrismaClient();
+  db = prisma;
+} else {
+  db = createFileStoreClient();
+}
 
 // ---------- Helpers: sync Telegram username (no auto-create) ----------
 const USERNAME_HANDLE_REGEX = /^[a-zA-Z0-9_]{3,32}$/;
@@ -43,7 +222,7 @@ function resolveProfileContact(profile) {
 async function syncTgUsername(userId, tgUser) {
   try {
      const uname = tgUser?.username || null;
-    const p = await prisma.profile.findUnique({ where: { userId } });
+     const p = await db.profile.findUnique({ where: { userId } });
        if (!p) return;
     const updates = {};
     if (p.tgUsername !== uname) {
@@ -57,7 +236,7 @@ async function syncTgUsername(userId, tgUser) {
       }
     }
     if (Object.keys(updates).length) {
-      await prisma.profile.update({ where: { userId }, data: updates });
+      await db.profile.update({ where: { userId }, data: updates });
     }
   } catch (_) {}
 }
@@ -89,7 +268,7 @@ function pickProfileFields(body = {}, tgUser = null) {
 }
 
 async function upsertProfileFromWebApp(userId, body, tgUser) {
-  const existing = await prisma.profile.findUnique({ where: { userId } });
+  const existing = await db.profile.findUnique({ where: { userId } });
   const fields = pickProfileFields(body, tgUser);
 
   const name = (fields.name || existing?.name || 'Гость').slice(0, 120);
@@ -107,10 +286,10 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
   };
 
   if (existing) {
-    return prisma.profile.update({ where: { userId }, data });
+    return db.profile.update({ where: { userId }, data });
   }
 
-  return prisma.profile.create({
+  return db.profile.create({
     data: {
       ...data,
       userId,
@@ -143,7 +322,7 @@ if (process.env.REDIS_URL) {
     redis = null;
   }
 } else {
-  console.log('Redis: DISABLED (no REDIS_URL)');
+    console.log('Redis: DISABLED (no REDIS_URL). Using in-memory matching queue. Set REDIS_URL to enable Redis.');
 }
 
 // ---------- Telegram bot helpers ----------
@@ -207,19 +386,6 @@ async function callTelegram(method, payload) {
   }
 }
 
-async function sendStartInstruction(message) {
-  const chatId = message?.chat?.id;
-  if (!chatId) return;
-
-  const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
-
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
-    text: 'Нажми кнопку «Старт» ниже, чтобы мы познакомились поближе 😊',
-    reply_markup: replyMarkup,
-  });
-}
-
 async function sendGreetingAndMiniApp(message) {
   const chatId = message?.chat?.id;
   if (!chatId) return;
@@ -263,12 +429,7 @@ async function handleTelegramUpdate(update) {
     const rawText = typeof message.text === 'string' ? message.text.trim() : '';
     const normalized = rawText.toLowerCase();
 
-    if (rawText === '/start') {
-      await sendStartInstruction(message);
-      return;
-    }
-
-    if (normalized === 'старт' || normalized === 'start') {
+    if (rawText === '/start' || normalized === 'старт' || normalized === 'start') {
       await sendGreetingAndMiniApp(message);
       return;
     }
@@ -277,7 +438,7 @@ async function handleTelegramUpdate(update) {
       const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
       await callTelegram('sendMessage', {
         chat_id: message.chat.id,
-        text: 'Напиши «/start», чтобы получить ссылку и кнопку запуска.',
+        text: 'Открой мини-приложение по кнопке выше, чтобы продолжить.',
         reply_markup: replyMarkup,
       });
       return;
@@ -325,6 +486,7 @@ async function ensureTelegramWebhook() {
     console.error('Failed to set Telegram webhook:', err?.message || err);
   }
 }
+
 // ---------- Telegram WebApp signature verify ----------
 function verifyInitData(initDataRaw) {
   try {
@@ -386,6 +548,7 @@ if (BOT_TOKEN) {
     res.status(503).json({ ok: false, error: 'bot_disabled' });
   });
 }
+
 // ---------- Health ----------
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
@@ -394,7 +557,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
   try {
     const uid = req.query.uid || req.userId;
     await syncTgUsername(String(uid), req.tgUser);
-    const p = await prisma.profile.findUnique({ where: { userId: String(uid) } });
+    const p = await db.profile.findUnique({ where: { userId: String(uid) } });
     if (!p) return res.json({ exists: false });
     res.json({ exists: true, profile: p });
   } catch (e) {
@@ -406,7 +569,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
 app.get('/api/profile/me', authMiddleware, async (req, res) => {
   try {
     await syncTgUsername(req.userId, req.tgUser);
-    const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
+    const p = await db.profile.findUnique({ where: { userId: req.userId } });
         // Профиль создаётся после сохранения данных в мини-аппе
     if (!p) return res.json({ profile: null });
     res.json({ profile: p });
@@ -437,7 +600,7 @@ app.post('/api/profile/save', authMiddleware, (_req, res) => {
       const { design } = req.body || {};
       if (!design) return res.status(400).json({ ok: false, error: 'design required' });
 
-      const p = await prisma.profile.upsert({
+      const p = await db.profile.upsert({
         where: { userId },
         create: {
           userId,
@@ -500,7 +663,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
     const now = Date.now();
 
     await syncTgUsername(userId, req.tgUser);
-    const self = await prisma.profile.findUnique({ where: { userId } });
+    const self = await db.profile.findUnique({ where: { userId } });
     if (!self) return res.json({ status: 'need_profile' });
 
     const other = await popWaiting(); // пытаемся забрать ждущего
@@ -509,11 +672,11 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
       const partnerId = other.userId;
       const dayKey = computeDayKey();
       const pairKey = makePairKey(userId, partnerId);
-           const already = await prisma.meeting.findUnique({
+           const already = await db.meeting.findUnique({
         where: { pairKey_dayKey: { pairKey, dayKey } },
       });
       if (already) return res.json({ status: 'already_today' });
-      await prisma.meeting.create({
+      await db.meeting.create({
         data: {
           userAId: userId,
           userBId: partnerId,
@@ -522,7 +685,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
         },
       });
       // возвращаем данные партнёра (имя + username)
-      const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
+      const partner = await db.profile.findUnique({ where: { userId: partnerId } });
       const partnerContact = resolveProfileContact(partner);
 
       return res.json({
@@ -553,7 +716,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     const from = req.query.from ? new Date(req.query.from) : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
     const to   = req.query.to   ? new Date(req.query.to)   : (() => { const d = new Date(); d.setHours(23,59,59,999); return d; })();
 
-    const list = await prisma.meeting.findMany({
+    const list = await db.meeting.findMany({
       where: {
             metAt: { gte: from, lte: to },
         OR: [{ userAId: userId }, { userBId: userId }]
@@ -564,7 +727,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     const items = [];
     for (const m of list) {
               const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
+      const p = await db.profile.findUnique({ where: { userId: otherId } });
             items.push({ user_id: otherId, profile: p, at: m.metAt });
     }
     res.json({ ok: true, items });
@@ -578,7 +741,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
 app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
-    const list = await prisma.meeting.findMany({
+    const list = await db.meeting.findMany({
          where: { OR: [{ userAId: userId }, { userBId: userId }] },
       orderBy: { metAt: 'desc' },
       take: 20
@@ -586,7 +749,7 @@ app.get('/api/history', authMiddleware, async (req, res) => {
     const history = [];
     for (const m of list) {
       const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
+      const p = await db.profile.findUnique({ where: { userId: otherId } });
          history.push({
         withId: otherId,
         withUsername: p?.tgUsername || null,

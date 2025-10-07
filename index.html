@@ -35,18 +35,6 @@
         </div>
       </section>
 
-      <section id="botGuide" class="bot-guide" data-state="intro">
-        <div class="bot-guide__bubble">
-          <button id="botGuideStart" class="btn primary bot-guide__start" type="button">Старт</button>
-          <div id="botGuideDialog" class="bot-guide__dialog" hidden>
-            <ul id="botGuideMessages" class="bot-guide__messages" aria-live="polite"></ul>
-            <button id="botGuideProceed" class="btn ghost bot-guide__proceed" type="button" hidden>
-              Перейти к анкете
-            </button>
-          </div>
-        </div>
-      </section>
-
       <section class="card-gamify" aria-live="polite">
         <div class="level-chip">
           <span id="levelLabel" class="level-rank">LVL 1</span>
@@ -176,7 +164,7 @@
 
   <!-- Адрес backend и имя бота (как было) -->
   <script>
-    window.__API_BASE__ = 'https://efes-app.onrender.com';
+    window.__API_BASE__ = window.location.origin;
     window.__BOT_USERNAME__ = 'EfesConnectBot';
   </script>
 
