@@ -14,6 +14,9 @@ app.use(express.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 10000;
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // e.g. https://efes-app.onrender.com
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
+const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook${TELEGRAM_WEBHOOK_SECRET ? `/${TELEGRAM_WEBHOOK_SECRET}` : ''}`;
+const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
 // ---------- Prisma ----------
 const prisma = new PrismaClient();
 
@@ -39,7 +42,7 @@ function resolveProfileContact(profile) {
 
 async function syncTgUsername(userId, tgUser) {
   try {
-    const uname = tgUser?.username || null;
+     const uname = tgUser?.username || null;
     const p = await prisma.profile.findUnique({ where: { userId } });
        if (!p) return;
     const updates = {};
@@ -117,7 +120,7 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
 }
 
 function computeDayKey(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+ return date.toISOString().slice(0, 10);
 }
 
 function makePairKey(a, b) {
@@ -141,6 +144,161 @@ if (process.env.REDIS_URL) {
   }
 } else {
   console.log('Redis: DISABLED (no REDIS_URL)');
+}
+
+// ---------- Telegram bot helpers ----------
+const START_KEYBOARD = {
+  keyboard: [[{ text: 'Старт' }]],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+function buildMiniAppLink() {
+  if (!PUBLIC_URL) return '';
+  return `${PUBLIC_URL.replace(/\/$/, '')}/`;
+}
+
+async function callTelegram(method, payload) {
+  if (!TELEGRAM_API_BASE) return null;
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || (data && data.ok === false)) {
+      const description = data?.description || res.statusText;
+      console.error(`Telegram API ${method} failed:`, description);
+    }
+    return data;
+  } catch (err) {
+    console.error(`Telegram API ${method} error:`, err?.message || err);
+    return null;
+  }
+}
+
+async function sendStartGreeting(message) {
+  const chatId = message?.chat?.id;
+  if (!chatId) return;
+
+  const firstName = message?.from?.first_name ? `, ${message.from.first_name}` : '';
+  const introLines = [
+    `👋 Привет${firstName}!`,
+    '',
+    'Нажми кнопку «Старт» ниже, чтобы бот прислал ссылку на мини-приложение.',
+  ];
+
+  const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
+
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: introLines.join('\n'),
+    reply_markup: replyMarkup,
+  });
+}
+
+async function sendMiniAppLink(message) {
+  const chatId = message?.chat?.id;
+  if (!chatId) return;
+  const miniAppUrl = buildMiniAppLink();
+
+  const lines = [];
+  lines.push('🚀 Поехали!');
+  if (miniAppUrl) {
+    lines.push('Открывай мини-приложение по ссылке:');
+    lines.push(miniAppUrl);
+  } else {
+    lines.push('Мини-приложение сейчас недоступно: не задан PUBLIC_URL на сервере.');
+  }
+  lines.push('Если кнопка внизу пропала, напиши «/start».');
+
+  const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
+
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: lines.join('\n'),
+    reply_markup: replyMarkup,
+    disable_web_page_preview: true,
+  });
+}
+
+async function handleTelegramUpdate(update) {
+  if (!update) return;
+
+  if (update.message) {
+    const message = update.message;
+    if (message.web_app_data) {
+      await callTelegram('sendMessage', {
+        chat_id: message.chat.id,
+        text: 'Данные мини-приложения получены! Если хочешь начать сначала — напиши «/start».',
+      });
+      return;
+    }
+    const rawText = typeof message.text === 'string' ? message.text.trim() : '';
+    const normalized = rawText.toLowerCase();
+
+    if (rawText === '/start') {
+      await sendStartGreeting(message);
+      return;
+    }
+
+    if (normalized === 'старт' || normalized === 'start') {
+      await sendMiniAppLink(message);
+      return;
+    }
+
+    if (normalized) {
+      const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
+      await callTelegram('sendMessage', {
+        chat_id: message.chat.id,
+        text: 'Напиши «/start», чтобы получить ссылку и кнопку запуска.',
+        reply_markup: replyMarkup,
+      });
+      return;
+    }
+  }
+
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    if (cq.data === 'start') {
+      await sendMiniAppLink({ chat: cq.message?.chat, from: cq.from });
+    }
+    if (cq.id) {
+      await callTelegram('answerCallbackQuery', { callback_query_id: cq.id });
+    }
+  }
+}
+
+async function ensureTelegramWebhook() {
+  if (!TELEGRAM_API_BASE || !PUBLIC_URL) {
+    if (BOT_TOKEN && !PUBLIC_URL) {
+      console.warn('Telegram bot: PUBLIC_URL is required to configure webhook.');
+    }
+    return;
+  }
+
+  const webhookUrl = `${PUBLIC_URL.replace(/\/$/, '')}${TELEGRAM_WEBHOOK_PATH}`;
+  const payload = {
+    url: webhookUrl,
+    allowed_updates: ['message', 'callback_query', 'web_app_data'],
+  };
+
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/setWebhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.error('Failed to set Telegram webhook:', data.description || data);
+    } else {
+      console.log('Telegram webhook configured at', webhookUrl);
+    }
+  } catch (err) {
+    console.error('Failed to set Telegram webhook:', err?.message || err);
+  }
 }
 
 // ---------- Telegram WebApp signature verify ----------
@@ -190,6 +348,21 @@ function authMiddleware(req, res, next) {
 // ---------- Static ----------
 app.use(express.static(path.join(__dirname))); // index.html, style.css, script.js, etc.
 
+if (BOT_TOKEN) {
+  app.post(TELEGRAM_WEBHOOK_PATH, async (req, res) => {
+    try {
+      await handleTelegramUpdate(req.body);
+    } catch (err) {
+      console.error('Telegram webhook handler error:', err?.message || err);
+    }
+    res.json({ ok: true });
+  });
+} else {
+  app.post(TELEGRAM_WEBHOOK_PATH, (_req, res) => {
+    res.status(503).json({ ok: false, error: 'bot_disabled' });
+  });
+}
+
 // ---------- Health ----------
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
@@ -215,7 +388,7 @@ app.get('/api/profile/me', authMiddleware, async (req, res) => {
     if (!p) return res.json({ profile: null });
     res.json({ profile: p });
   } catch (e) {
-    console.error(e);
+   console.error(e);
     res.status(500).json({ ok: false });
   }
 });
@@ -410,6 +583,6 @@ app.listen(PORT, () => {
   console.log(`Efes app listening on :${PORT}`);
   if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
   if (BOT_TOKEN) {
-    console.log('Telegram bot webhook is disabled in this build. (JS bot not in use)');
+       ensureTelegramWebhook();
   }
 });
