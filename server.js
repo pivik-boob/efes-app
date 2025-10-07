@@ -153,6 +153,35 @@ const START_KEYBOARD = {
   is_persistent: true,
 };
 
+function formatGreeting(message) {
+  const firstName = message?.from?.first_name?.trim();
+  const displayName = firstName || 'друг';
+  const userId = message?.from?.id ? ` (${message.from.id})` : '';
+
+  return [
+    `Привет, ${displayName}${userId}😄`,
+    '',
+    'Рад знакомству! Меня зовут Пивик 🙂',
+    'Я твой личный ассистент в мире Эфеса 🍻',
+    'Давай я расскажу тебе подробнее про нашу цифровую бутылочку Эфес 😉',
+    '',
+    'С бутылочкой ты можешь легко обмениваться контактами на любых мероприятиях от Эфеса 😙',
+    'Давай создадим твою персональную цифровую бутылочку Эфес!'
+  ].join('\n');
+}
+
+function buildMiniAppButton() {
+  const miniAppUrl = buildMiniAppLink();
+  if (!miniAppUrl) return null;
+
+  return {
+    inline_keyboard: [[{
+      text: 'Открыть мини-приложение Эфес',
+      web_app: { url: miniAppUrl },
+    }]],
+  };
+}
+
 function buildMiniAppLink() {
   if (!PUBLIC_URL) return '';
   return `${PUBLIC_URL.replace(/\/$/, '')}/`;
@@ -178,49 +207,45 @@ async function callTelegram(method, payload) {
   }
 }
 
-async function sendStartGreeting(message) {
+async function sendStartInstruction(message) {
   const chatId = message?.chat?.id;
   if (!chatId) return;
-
-  const firstName = message?.from?.first_name ? `, ${message.from.first_name}` : '';
-  const introLines = [
-    `👋 Привет${firstName}!`,
-    '',
-    'Нажми кнопку «Старт» ниже, чтобы бот прислал ссылку на мини-приложение.',
-  ];
 
   const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
-    text: introLines.join('\n'),
+    text: 'Нажми кнопку «Старт» ниже, чтобы мы познакомились поближе 😊',
     reply_markup: replyMarkup,
   });
 }
 
-async function sendMiniAppLink(message) {
+async function sendGreetingAndMiniApp(message) {
   const chatId = message?.chat?.id;
   if (!chatId) return;
-  const miniAppUrl = buildMiniAppLink();
 
-  const lines = [];
-  lines.push('🚀 Поехали!');
-  if (miniAppUrl) {
-    lines.push('Открывай мини-приложение по ссылке:');
-    lines.push(miniAppUrl);
-  } else {
-    lines.push('Мини-приложение сейчас недоступно: не задан PUBLIC_URL на сервере.');
-  }
-  lines.push('Если кнопка внизу пропала, напиши «/start».');
-
+  const greetingText = formatGreeting(message);
   const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
-    text: lines.join('\n'),
+    text: greetingText,
     reply_markup: replyMarkup,
-    disable_web_page_preview: true,
   });
+
+  const miniAppButton = buildMiniAppButton();
+  const miniAppMessage = {
+    chat_id: chatId,
+    text: miniAppButton
+      ? 'Готов пройти анкету, выбрать настроение и чокнуться с другими гостями? Жми кнопку ниже!'
+      : 'Мини-приложение сейчас недоступно: администратору нужно настроить PUBLIC_URL.',
+  };
+
+  if (miniAppButton) {
+    miniAppMessage.reply_markup = miniAppButton;
+  }
+
+  await callTelegram('sendMessage', miniAppMessage);
 }
 
 async function handleTelegramUpdate(update) {
@@ -239,12 +264,12 @@ async function handleTelegramUpdate(update) {
     const normalized = rawText.toLowerCase();
 
     if (rawText === '/start') {
-      await sendStartGreeting(message);
+      await sendStartInstruction(message);
       return;
     }
 
     if (normalized === 'старт' || normalized === 'start') {
-      await sendMiniAppLink(message);
+      await sendGreetingAndMiniApp(message);
       return;
     }
 
@@ -262,7 +287,7 @@ async function handleTelegramUpdate(update) {
   if (update.callback_query) {
     const cq = update.callback_query;
     if (cq.data === 'start') {
-      await sendMiniAppLink({ chat: cq.message?.chat, from: cq.from });
+      await sendGreetingAndMiniApp({ chat: cq.message?.chat, from: cq.from });
     }
     if (cq.id) {
       await callTelegram('answerCallbackQuery', { callback_query_id: cq.id });
@@ -300,7 +325,6 @@ async function ensureTelegramWebhook() {
     console.error('Failed to set Telegram webhook:', err?.message || err);
   }
 }
-
 // ---------- Telegram WebApp signature verify ----------
 function verifyInitData(initDataRaw) {
   try {
@@ -362,7 +386,6 @@ if (BOT_TOKEN) {
     res.status(503).json({ ok: false, error: 'bot_disabled' });
   });
 }
-
 // ---------- Health ----------
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
