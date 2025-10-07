@@ -1,0 +1,3 @@
+ALTER TABLE "public"."Profile"
+  ADD COLUMN IF NOT EXISTS "age" INTEGER,
+  ADD COLUMN IF NOT EXISTS "contact" TEXT;

@@ -9,58 +9,46 @@ datasource db {
 }
 
 model Profile {
-
-  userId      String   @id
-
-  tgUsername  String?
-
-  name        String
-
-  age21       Boolean?
-
-  instagram   String?
-
-  mood        String?  @default("🙂")
- 
-  design      String?  @default("classic")
-
-  photoFileId String?
-
-  updatedAt   DateTime @updatedAt
-
-
-  giftsFrom   GiftCode[] @relation("GiftsFrom")
-  giftsTo     GiftCode[] @relation("GiftsTo")
+  userId String @id
+   tgUsername String?
+   name String
+   age21 Boolean?
+    age Int?
+    instagram String?
+   contact String?
+   mood String? @default("🙂")
+   design String? @default("classic")
+   photoFileId String?
+   updatedAt DateTime @updatedAt
+    giftsFrom GiftCode[] @relation("GiftsFrom")
+    giftsTo   GiftCode[] @relation("GiftsTo")
 }
 
 model Meeting {
-  id       String   @id @default(cuid())
- 
-  userAId  String
-  
-  userBId  String
-
-  dayKey   String
-
-  pairKey  String
-
-  metAt    DateTime @default(now())
-
-  @@unique([pairKey, dayKey])
-  @@index([dayKey])
-  @@index([userAId, metAt])
-  @@index([userBId, metAt])
+    id String @id @default(cuid())
+    userAId String
+    userBId String
+    dayKey String
+    
+    pairKey String
+    
+    metAt DateTime @default(now())
+    
+    @@unique([pairKey, dayKey])
+    @@index([dayKey])
+    @@index([userAId, metAt])
+    @@index([userBId, metAt])
 }
 
 model GiftCode {
-  voucher    String   @id
+  voucher    String    @id
   fromUserId String
   toUserId   String
   message    String?
-  redeemed   Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  redeemed   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
   expiresAt  DateTime?
 
   from Profile @relation("GiftsFrom", fields: [fromUserId], references: [userId])
-  to   Profile @relation("GiftsTo",   fields: [toUserId],   references: [userId])
+  to   Profile @relation("GiftsTo", fields: [toUserId], references: [userId])
 }

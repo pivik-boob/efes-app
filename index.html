@@ -35,6 +35,18 @@
         </div>
       </section>
 
+      <section id="botGuide" class="bot-guide" data-state="intro">
+        <div class="bot-guide__bubble">
+          <button id="botGuideStart" class="btn primary bot-guide__start" type="button">Старт</button>
+          <div id="botGuideDialog" class="bot-guide__dialog" hidden>
+            <ul id="botGuideMessages" class="bot-guide__messages" aria-live="polite"></ul>
+            <button id="botGuideProceed" class="btn ghost bot-guide__proceed" type="button" hidden>
+              Перейти к анкете
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section class="card-gamify" aria-live="polite">
         <div class="level-chip">
           <span id="levelLabel" class="level-rank">LVL 1</span>
@@ -49,7 +61,15 @@
             <div id="xpFill" class="xp-fill"></div>
           </div>
         </div>
-        <ul id="questList" class="quest-board"></ul>
+                <details id="questDropdown" class="quest-dropdown">
+          <summary class="quest-summary">
+            <span class="quest-summary__title">Задания</span>
+            <span class="quest-summary__chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="quest-body">
+            <ul id="questList" class="quest-board"></ul>
+          </div>
+        </details>
       </section>
 
       <section class="card-bottle">
@@ -77,17 +97,17 @@
             <span class="design-icon bottle-visual visual--bottle bottle--efes" aria-hidden="true"></span>
             <span class="design-label">Efes</span>
           </button>
+                    <button class="design-card design-card--medved" data-design="medved" type="button">
+            <span class="design-icon bottle-visual visual--bottle bottle--medved" aria-hidden="true"></span>
+            <span class="design-label">Белый медведь</span>
+          </button>
+          <button class="design-card design-card--ruzka" data-design="ruzka" type="button">
+            <span class="design-icon bottle-visual visual--bottle bottle--ruzka" aria-hidden="true"></span>
+            <span class="design-label">Ружка светлое</span>
+          </button>
           <button class="design-card design-card--miller" data-design="miller" type="button">
             <span class="design-icon bottle-visual visual--bottle bottle--miller" aria-hidden="true"></span>
             <span class="design-label">Miller</span>
-          </button>
-          <button class="design-card design-card--ruzka" data-design="ruzka" type="button">
-            <span class="design-icon bottle-visual visual--mug mug--ruzka" aria-hidden="true"></span>
-            <span class="design-label">Кружка свежего</span>
-          </button>
-          <button class="design-card design-card--medved" data-design="medved" type="button">
-            <span class="design-icon bottle-visual visual--bottle bottle--medved" aria-hidden="true"></span>
-            <span class="design-label">Белый медведь</span>
           </button>
         </div>
       </section>
@@ -104,11 +124,21 @@
         </label>
         <label class="field field--mood">
           <span>Настроение</span>
-          <input id="moodInput" type="text" placeholder="Весёлое / Чилл / ..." required>
+                 <div class="mood-carousel" id="moodCarousel" data-index="0">
+            <button class="mood-nav mood-nav--prev" id="moodPrev" type="button" aria-label="Предыдущее настроение"></button>
+            <div class="mood-window" id="moodWindow">
+              <ul class="mood-track" id="moodTrack" role="listbox" aria-live="polite"></ul>
+            </div>
+            <button class="mood-nav mood-nav--next" id="moodNext" type="button" aria-label="Следующее настроение"></button>
+          </div>
+          <p id="moodActiveText" class="mood-active-text" aria-live="polite"></p>
+          <input id="moodInput" type="hidden" required>
+          <input id="moodCustomInput" class="mood-custom-input" type="text" placeholder="Опиши своё настроение" autocomplete="off">
         </label>
-        <label class="field field--contact">
+                 <label class="field field--contact" id="contactField">
           <span>Контакт</span>
-          <input id="contactInput" type="text" placeholder="@nickname" required>
+                   <input id="contactInput" type="text" placeholder="@nickname" autocomplete="off">
+          <p id="contactNote" class="field-note">Мы автоматически подставим твой Telegram @username.</p>
         </label>
         <div class="edit-actions">
           <button class="btn primary" id="saveProfileBtn" type="button">Сохранить</button>
@@ -123,7 +153,7 @@
             <option value="efes">EFES</option>
             <option value="miller">Miller</option>
             <option value="ruzka">Кружка свежего</option>
-            <option value="medved">Белый медведь</option>
+                        <option value="medved">Белый медведь</option>
           </select>
         </div>
       </section>
@@ -137,8 +167,7 @@
         <div class="action-row">
           <button class="btn ghost" id="friendsBtn" type="button">Мои знакомства</button>
         </div>
-        <button class="btn ghost" id="fillInChatBtn" type="button" style="display:none;">Заполнить в чате</button>
-      </footer>
+              </footer>
     </section>
    <button id="openFromBotBtn" class="bot-entry" type="button" style="display:none;">
       Открыть мини-апп из бота
@@ -159,15 +188,13 @@
   <!-- Твой основной скрипт -->
   <script src="/script2.js" defer></script>
   <!-- Безопасный помощник: показать fallback-кнопку вне Telegram -->
-  <script>
+ <script>
     (function() {
-       document.addEventListener('DOMContentLoaded', function () {
-               const fallback = document.getElementById('openFromBotBtn');
+      document.addEventListener('DOMContentLoaded', function () {
+        const fallback = document.getElementById('openFromBotBtn');
         if (!window.Telegram?.WebApp && fallback) {
           fallback.style.display = 'block';
         }
       });
     })();
   </script>
-</body>
-</html>

@@ -21,6 +21,7 @@ const els = {
   xpFill: document.getElementById("xpFill"),
   xpBar: document.querySelector(".xp-bar"),
   questList: document.getElementById("questList"),
+  questDropdown: document.getElementById("questDropdown"),
   editBlock: document.getElementById("editBlock"),
   editBtn: document.getElementById("editBtn"),
   cancelEditBtn: document.getElementById("cancelEditBtn"),
@@ -28,8 +29,16 @@ const els = {
   nameInput: document.getElementById("nameInput"),
   ageInput: document.getElementById("ageInput"),
   moodInput: document.getElementById("moodInput"),
+  moodCarousel: document.getElementById("moodCarousel"),
+  moodTrack: document.getElementById("moodTrack"),
+  moodWindow: document.getElementById("moodWindow"),
+  moodPrev: document.getElementById("moodPrev"),
+  moodNext: document.getElementById("moodNext"),
+  moodActiveText: document.getElementById("moodActiveText"),
+  moodCustomInput: document.getElementById("moodCustomInput"),
   contactInput: document.getElementById("contactInput"),
-  fillInChatBtn: document.getElementById("fillInChatBtn"),
+    contactNote: document.getElementById("contactNote"),
+  contactField: document.getElementById("contactField"),
   friendsBtn: document.getElementById("friendsBtn"),
   themeSelect: document.getElementById("themeSel"),
   historyList: document.getElementById("historyList"),
@@ -38,6 +47,11 @@ const els = {
   designOptions: document.getElementById("designOptions"),
   saveDesignBtn: document.getElementById("saveDesignBtn"),
   openFromBotBtn: document.getElementById("openFromBotBtn"),
+  botGuide: document.getElementById("botGuide"),
+  botGuideStart: document.getElementById("botGuideStart"),
+  botGuideDialog: document.getElementById("botGuideDialog"),
+  botGuideMessages: document.getElementById("botGuideMessages"),
+  botGuideProceed: document.getElementById("botGuideProceed"),
 };
 
 const state = {
@@ -46,7 +60,28 @@ const state = {
   countdownEndsAt: 0,
   lastHistoryTimestamp: 0,
   selectedDesign: "efes",
-  profile: null,
+    profile: undefined,
+  profileRequired: false,
+  moodOptions: [],
+  moodCardRefs: [],
+  moodIndex: 0,
+  customMoodValue: "",
+  guideComplete: false,
+  autoContact: null,
+};
+
+const moodGestureState = {
+  active: false,
+  startX: 0,
+  lastX: 0,
+  pointerId: null,
+};
+
+const guideState = {
+  started: false,
+  finished: false,
+  timer: null,
+  index: 0,
 };
 
 const DESIGN_ASSETS = {
@@ -56,17 +91,11 @@ const DESIGN_ASSETS = {
     visual: "bottle",
     className: "bottle--efes",
   },
-  miller: {
-    label: "Miller",
-    theme: "miller",
-    visual: "bottle",
-    className: "bottle--miller",
-  },
-  ruzka: {
+    ruzka: {
     label: "Кружка свежего",
     theme: "ruzka",
-    visual: "mug",
-    className: "mug--ruzka",
+       visual: "bottle",
+    className: "bottle--ruzka",
   },
   medved: {
     label: "Белый медведь",
@@ -74,13 +103,18 @@ const DESIGN_ASSETS = {
     visual: "bottle",
     className: "bottle--medved",
   },
+  miller: {
+    label: "Miller",
+    theme: "miller",
+    visual: "bottle",
+    className: "bottle--miller",
+  },
 };
 
 const DESIGN_CLASSNAMES = Object.values(DESIGN_ASSETS)
   .map(cfg => cfg.className)
   .filter(Boolean);
-
-const VISUAL_VARIANTS = ["visual--bottle", "visual--mug"];
+  const VISUAL_VARIANTS = ["visual--bottle"];
 
 const DESIGN_ALIASES = {
   classic: "efes",
@@ -95,32 +129,87 @@ const THEMES = {
   medved: "theme-medved",
 };
 
+const GUIDE_MESSAGES = [
+  {
+    sender: "bot",
+    text: "Привет! Я Efes-бот и помогу разобраться, что такое Чок.",
+  },
+  {
+    sender: "bot",
+    text: "Чок — это быстрый обмен знакомствами: нажми кнопку, встряхни телефон и мы покажем, кто рядом.",
+  },
+  {
+    sender: "bot",
+    text: "Чтобы всё сработало, заполни анкету прямо в мини-аппе и выбери свою пиксельную бутылочку.",
+  },
+  {
+    sender: "bot",
+    text: "Готов? Жми «Перейти к анкете» ниже и создавай свой вайб!",
+  },
+];
+
 const THEME_BACKGROUNDS = {
   efes: [
-    "img/bg-efes.jpg",
-    "img/Эфес.jpg",
-    "img/Эфес.jpeg",
-    "img/Эфес.png",
+        "img/ефес.jpg",
+    "img/Group-PDF-Export_page-0001.jpg",
+    "img/Group-PDF-Export_page-0002.jpg",
   ],
   miller: [
-    "img/bg-miller.jpg",
-    "img/Миллер.jpg",
-    "img/Миллер.jpeg",
-    "img/Миллер.png",
+        "img/миллер.jpg",
+    "img/Group-PDF-Export_page-0002.jpg",
+    "img/Group-PDF-Export_page-0001.jpg",
   ],
   ruzka: [
-    "img/bg-ruzka.jpg",
-    "img/Кружка свежего.jpg",
-    "img/Кружка свежего.jpeg",
-    "img/Кружка свежего.png",
+        "img/ружка свежего.jpg",
+    "img/Group-PDF-Export_page-0001.jpg",
+    "img/Group-PDF-Export_page-0002.jpg",
   ],
   medved: [
-    "img/bg-medved.jpg",
-    "img/Белый медведь.jpg",
-    "img/Белый медведь.jpeg",
-    "img/Белый медведь.png",
+        "img/медведь.jpg",
+    "img/Group-PDF-Export_page-0002.jpg",
+    "img/Group-PDF-Export_page-0001.jpg",
   ],
 };
+
+const MOOD_PRESETS = [
+  {
+    value: "Весёлое",
+    label: "Весёлое",
+    emoji: "🥳",
+    description: "Готов(а) чокаться со всеми подряд",
+  },
+  {
+    value: "Чилл",
+    label: "Чилл",
+    emoji: "😌",
+    description: "Спокойно отдыхаю и ловлю вайб",
+  },
+  {
+    value: "Энергичное",
+    label: "Энергичное",
+    emoji: "⚡️",
+    description: "В поиске драйва и шумных компаний",
+  },
+  {
+    value: "Флирт",
+    label: "Флирт",
+    emoji: "😉",
+    description: "Настроение ловить искры и улыбки",
+  },
+  {
+    value: "Танцевальное",
+    label: "Танцевальное",
+    emoji: "💃",
+    description: "Готов(а) выйти на танцпол прямо сейчас",
+  },
+  {
+    value: "",
+    label: "Своё настроение",
+    emoji: "✨",
+    description: "Придумай свой вайб и поделись им",
+    custom: true,
+  },
+];
 
 const backgroundCache = {};
 const backgroundPromises = {};
@@ -144,6 +233,95 @@ function getFallbackBackground(theme) {
   }
   const fallback = getBackgroundCandidates("efes");
   return fallback[0] || "";
+}
+
+function clearGuideTimer() {
+  if (guideState.timer) {
+    clearTimeout(guideState.timer);
+    guideState.timer = null;
+  }
+}
+
+function appendGuideMessage(message) {
+  if (!els.botGuideMessages || !message) return;
+  const li = document.createElement("li");
+  li.className = `bot-message bot-message--${message.sender || "bot"}`;
+  li.textContent = message.text || "";
+  els.botGuideMessages.appendChild(li);
+  if (typeof els.botGuideMessages.scrollTo === "function") {
+    els.botGuideMessages.scrollTo({
+      top: els.botGuideMessages.scrollHeight,
+      behavior: "smooth",
+    });
+  } else {
+    els.botGuideMessages.scrollTop = els.botGuideMessages.scrollHeight;
+  }
+}
+
+function playGuideStep(index) {
+  if (!GUIDE_MESSAGES[index]) {
+    finishGuideConversation();
+    return;
+  }
+  const delay = index === 0 ? 350 : 1100;
+  guideState.timer = setTimeout(() => {
+    appendGuideMessage(GUIDE_MESSAGES[index]);
+    guideState.index = index + 1;
+    playGuideStep(index + 1);
+  }, delay);
+}
+
+function startGuideConversation() {
+  if (!els.botGuide) return;
+  clearGuideTimer();
+  guideState.started = true;
+  guideState.finished = false;
+  guideState.index = 0;
+  if (els.botGuideMessages) {
+    els.botGuideMessages.innerHTML = "";
+  }
+  if (els.botGuideStart) {
+    els.botGuideStart.hidden = true;
+  }
+  if (els.botGuideDialog) {
+    els.botGuideDialog.hidden = false;
+  }
+  if (els.botGuideProceed) {
+    els.botGuideProceed.hidden = true;
+  }
+  appendGuideMessage({ sender: "user", text: "Старт" });
+  playGuideStep(0);
+  updateGuideVisibility();
+}
+
+function finishGuideConversation() {
+  clearGuideTimer();
+  guideState.finished = true;
+  if (els.botGuideProceed) {
+    els.botGuideProceed.hidden = false;
+  }
+  updateGuideVisibility();
+}
+
+function updateGuideVisibility() {
+  if (!els.botGuide) return;
+  const requireProfile = state.profileRequired && !state.profile;
+  if (!requireProfile || state.guideComplete) {
+    els.botGuide.dataset.state = "done";
+    els.botGuide.setAttribute("hidden", "hidden");
+    return;
+  }
+  els.botGuide.dataset.state = guideState.started ? "open" : "intro";
+  els.botGuide.removeAttribute("hidden");
+  if (els.botGuideStart) {
+    els.botGuideStart.hidden = guideState.started;
+  }
+  if (els.botGuideDialog) {
+    els.botGuideDialog.hidden = !guideState.started;
+  }
+  if (els.botGuideProceed) {
+    els.botGuideProceed.hidden = !guideState.finished;
+  }
 }
 
 function toCssUrl(path) {
@@ -171,12 +349,12 @@ function resolveBackground(theme) {
 
   backgroundPromises[key] = new Promise((resolve) => {
     let index = 0;
-    const tryNext = () => {
+     const tryNext = () => {
       if (index >= candidates.length) {
-        resolve(fallback);
-        return;
-      }
-      const candidate = candidates[index++];
+     resolve(fallback);
+     return;
+     }
+          const candidate = candidates[index++];
       if (!candidate) {
         tryNext();
         return;
@@ -199,6 +377,272 @@ function resolveBackground(theme) {
 function getResolvedBackground(theme) {
   const key = THEMES[theme] ? theme : "efes";
   return backgroundCache[key] || getFallbackBackground(key);
+}
+
+function getCustomMoodIndex() {
+  return state.moodOptions.findIndex(option => option.custom);
+}
+
+function updateCustomCard(value) {
+  const ref = state.moodCardRefs.find(entry => entry.option.custom);
+  if (ref?.customValueEl) {
+    ref.customValueEl.textContent = value ? `— ${value}` : "";
+  }
+}
+
+function renderMoodOptions() {
+  if (!els.moodTrack) return;
+  els.moodTrack.innerHTML = "";
+  state.moodCardRefs = [];
+  state.moodOptions.forEach((option, index) => {
+    const card = document.createElement("li");
+    card.className = "mood-card";
+    card.dataset.index = String(index);
+    card.id = `mood-card-${index}`;
+    card.setAttribute("role", "option");
+    card.tabIndex = -1;
+
+    const emoji = document.createElement("span");
+    emoji.className = "mood-emoji";
+    emoji.textContent = option.emoji || "";
+    card.appendChild(emoji);
+
+    const title = document.createElement("span");
+    title.className = "mood-title";
+    title.textContent = option.label;
+    card.appendChild(title);
+
+    if (option.description) {
+      const desc = document.createElement("span");
+      desc.className = "mood-desc";
+      desc.textContent = option.description;
+      card.appendChild(desc);
+    }
+
+    let customValueEl = null;
+    if (option.custom) {
+      customValueEl = document.createElement("span");
+      customValueEl.className = "mood-custom-value";
+      card.appendChild(customValueEl);
+    }
+
+    card.addEventListener("click", () => {
+      setMoodIndex(index, { focusCustom: option.custom });
+    });
+
+    card.addEventListener("keydown", (event) => {
+      const key = event.key;
+      if (key === "Enter" || key === " " || key === "Spacebar") {
+        event.preventDefault();
+        setMoodIndex(index, { focusCustom: option.custom });
+        return;
+      }
+      if (key === "ArrowRight" || key === "ArrowDown") {
+        event.preventDefault();
+        setMoodIndex(index + 1);
+        return;
+      }
+      if (key === "ArrowLeft" || key === "ArrowUp") {
+        event.preventDefault();
+        setMoodIndex(index - 1);
+      }
+    });
+
+    state.moodCardRefs.push({ node: card, option, customValueEl });
+    els.moodTrack.appendChild(card);
+  });
+}
+
+function findMoodIndexByValue(value) {
+  if (!value) return -1;
+  const normalized = value.trim().toLowerCase();
+  return state.moodOptions.findIndex(option => !option.custom && option.value && option.value.trim().toLowerCase() === normalized);
+}
+
+function setMoodIndex(index, options = {}) {
+  if (!els.moodTrack || !state.moodOptions.length) return;
+  const length = state.moodOptions.length;
+  const target = ((index % length) + length) % length;
+  state.moodIndex = target;
+  const offset = -target * 100;
+  els.moodTrack.style.setProperty("--offset", `${offset}%`);
+  if (els.moodCarousel) {
+    els.moodCarousel.dataset.index = String(target);
+  }
+
+  state.moodCardRefs.forEach((entry, idx) => {
+    const isActive = idx === target;
+    entry.node.classList.toggle("is-active", isActive);
+    entry.node.setAttribute("aria-selected", isActive ? "true" : "false");
+    entry.node.tabIndex = isActive ? 0 : -1;
+  });
+
+  const activeRef = state.moodCardRefs[target];
+  if (activeRef) {
+    els.moodTrack.setAttribute("aria-activedescendant", activeRef.node.id);
+  }
+
+  const option = state.moodOptions[target];
+  if (!option) return;
+
+  if (option.custom && options.prefill !== undefined) {
+    const raw = typeof options.prefill === "string" ? options.prefill : "";
+    state.customMoodValue = raw.trim();
+  }
+
+  let displayValue = option.value;
+  if (option.custom) {
+    if (els.moodCustomInput) {
+      els.moodCustomInput.classList.add("is-visible");
+      const inputValue = options.prefill !== undefined
+        ? (typeof options.prefill === "string" ? options.prefill.trim() : "")
+        : state.customMoodValue;
+      els.moodCustomInput.value = inputValue;
+      if (options.focusCustom) {
+        const focusInput = () => {
+          if (!els.moodCustomInput) return;
+          els.moodCustomInput.focus();
+          if (typeof els.moodCustomInput.select === "function") {
+            els.moodCustomInput.select();
+          }
+        };
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(focusInput);
+        } else {
+          setTimeout(focusInput, 0);
+        }
+      }
+    }
+    if (options.prefill === undefined) {
+      state.customMoodValue = (els.moodCustomInput?.value || state.customMoodValue || "").trim();
+    }
+    updateCustomCard(state.customMoodValue);
+    displayValue = state.customMoodValue || option.label;
+    if (els.moodInput) {
+      els.moodInput.value = state.customMoodValue;
+    }
+  } else {
+    if (els.moodCustomInput) {
+      els.moodCustomInput.classList.remove("is-visible");
+    }
+    if (els.moodInput) {
+      els.moodInput.value = option.value;
+    }
+    displayValue = option.value;
+  }
+
+  if (els.moodActiveText) {
+    els.moodActiveText.textContent = displayValue ? `Сейчас: ${displayValue}` : "";
+  }
+}
+
+function handleMoodNav(direction) {
+  setMoodIndex(state.moodIndex + direction);
+}
+
+function handleMoodCustomInput() {
+  const value = (els.moodCustomInput?.value || "").trim();
+  state.customMoodValue = value;
+  updateCustomCard(value);
+  if (els.moodInput && state.moodOptions[state.moodIndex]?.custom) {
+    els.moodInput.value = value;
+    const option = state.moodOptions[state.moodIndex];
+    const displayValue = value || option.label;
+    if (els.moodActiveText) {
+      els.moodActiveText.textContent = displayValue ? `Сейчас: ${displayValue}` : "";
+    }
+  }
+}
+
+function applyProfileMood(value) {
+  if (!els.moodTrack || !state.moodOptions.length) return;
+  const mood = typeof value === "string" ? value.trim() : "";
+  if (!mood) {
+    state.customMoodValue = "";
+    setMoodIndex(0);
+    return;
+  }
+  const foundIndex = findMoodIndexByValue(mood);
+  if (foundIndex >= 0) {
+    setMoodIndex(foundIndex);
+    return;
+  }
+  const customIndex = getCustomMoodIndex();
+  if (customIndex >= 0) {
+    state.customMoodValue = mood;
+    setMoodIndex(customIndex, { prefill: mood });
+  }
+}
+
+function initMoodGestures() {
+  if (!els.moodWindow || !els.moodTrack) return;
+
+  const onPointerDown = (event) => {
+    if (event.pointerType === "mouse" && event.buttons !== 1) return;
+    moodGestureState.active = true;
+    moodGestureState.startX = event.clientX;
+    moodGestureState.lastX = event.clientX;
+    moodGestureState.pointerId = event.pointerId;
+    els.moodWindow.classList.add("is-gesturing");
+    try {
+      els.moodWindow.setPointerCapture(event.pointerId);
+    } catch (_) {}
+  };
+
+  const onPointerMove = (event) => {
+    if (!moodGestureState.active || event.pointerId !== moodGestureState.pointerId) return;
+    moodGestureState.lastX = event.clientX;
+    const width = els.moodWindow.clientWidth || 1;
+    const delta = moodGestureState.lastX - moodGestureState.startX;
+    const percent = (delta / width) * 100;
+    els.moodTrack.style.setProperty("--offset", `calc(${ -state.moodIndex * 100 }% + ${percent}%)`);
+  };
+
+  const finishGesture = (event) => {
+    if (!moodGestureState.active || (event && event.pointerId !== moodGestureState.pointerId)) return;
+    const width = els.moodWindow.clientWidth || 1;
+    const delta = moodGestureState.lastX - moodGestureState.startX;
+    moodGestureState.active = false;
+    els.moodWindow.classList.remove("is-gesturing");
+    try {
+      if (moodGestureState.pointerId != null) {
+        els.moodWindow.releasePointerCapture(moodGestureState.pointerId);
+      }
+    } catch (_) {}
+    moodGestureState.pointerId = null;
+    const threshold = width * 0.2;
+    if (Math.abs(delta) > threshold) {
+      setMoodIndex(state.moodIndex + (delta < 0 ? 1 : -1));
+    } else {
+      setMoodIndex(state.moodIndex);
+    }
+  };
+
+  const onPointerLeave = (event) => {
+    if (!moodGestureState.active) return;
+    moodGestureState.lastX = event.clientX;
+    finishGesture(event);
+  };
+
+  els.moodWindow.addEventListener("pointerdown", onPointerDown);
+  els.moodWindow.addEventListener("pointermove", onPointerMove);
+  els.moodWindow.addEventListener("pointerup", finishGesture);
+  els.moodWindow.addEventListener("pointercancel", finishGesture);
+  els.moodWindow.addEventListener("pointerleave", onPointerLeave);
+}
+
+function initMoodCarousel() {
+  if (!els.moodTrack) return;
+  state.moodOptions = [...MOOD_PRESETS];
+  state.customMoodValue = (els.moodCustomInput?.value || "").trim();
+  renderMoodOptions();
+  updateCustomCard(state.customMoodValue);
+  setMoodIndex(0);
+  els.moodPrev?.addEventListener("click", () => handleMoodNav(-1));
+  els.moodNext?.addEventListener("click", () => handleMoodNav(1));
+  els.moodCustomInput?.addEventListener("input", handleMoodCustomInput);
+  els.moodCustomInput?.addEventListener("change", handleMoodCustomInput);
+  initMoodGestures();
 }
 
 function updateDesignCardBackgrounds() {
@@ -228,6 +672,70 @@ function formatUsername(value) {
   const trimmed = String(value).trim();
   if (!trimmed) return null;
   return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
+const USERNAME_HANDLE_REGEX = /^[a-zA-Z0-9_]{3,32}$/;
+
+function formatContactValue(value) {
+  if (!value) return "";
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("@")) return trimmed;
+  if (USERNAME_HANDLE_REGEX.test(trimmed)) {
+    return `@${trimmed}`;
+  }
+  return trimmed;
+}
+
+function getContactField() {
+  if (els.contactField) return els.contactField;
+  return els.contactInput?.closest?.(".field--contact") || null;
+}
+
+function applyContactAutofill(profileOverride = null) {
+  if (!els.contactInput) return;
+  const profile = profileOverride ?? state.profile ?? null;
+  const tgUsername = tg?.initDataUnsafe?.user?.username || null;
+  const derivedHandle = tgUsername
+    || profile?.tgUsername
+    || profile?.telegramUsername
+    || profile?.tg_username
+    || profile?.telegram_user
+    || profile?.telegram;
+
+  const autofillContact = formatContactValue(derivedHandle);
+  const contactField = getContactField();
+
+  if (autofillContact) {
+    state.autoContact = autofillContact;
+    els.contactInput.value = autofillContact;
+    els.contactInput.readOnly = true;
+    els.contactInput.setAttribute("aria-readonly", "true");
+    if (contactField) {
+      contactField.classList.add("field--contact-locked");
+    }
+    if (els.contactNote) {
+      els.contactNote.textContent = "Мы используем твой Telegram @username — его увидит собеседник после чока.";
+      els.contactNote.hidden = false;
+    }
+  } else {
+    state.autoContact = null;
+    const fallbackContact = profile?.contact ? formatContactValue(profile.contact) : "";
+    if (fallbackContact) {
+      els.contactInput.value = fallbackContact;
+    } else if (!profile) {
+      els.contactInput.value = "";
+    }
+    els.contactInput.readOnly = false;
+    els.contactInput.removeAttribute("aria-readonly");
+    if (contactField) {
+      contactField.classList.remove("field--contact-locked");
+    }
+    if (els.contactNote) {
+      els.contactNote.textContent = "Укажи, как с тобой связаться (например, телефон или @username).";
+      els.contactNote.hidden = false;
+    }
+  }
 }
 
 function updateUsernameDisplay(profile) {
@@ -261,7 +769,7 @@ function updateUsernameDisplay(profile) {
       els.username.textContent = fullName;
       return;
     }
-     }
+      }
   if (profile?.name) {
     els.username.textContent = profile.name;
     return;
@@ -286,9 +794,8 @@ function toDayStamp(value) {
   date.setHours(0, 0, 0, 0);
   return date.getTime();
 }
-
 function computeStats(history = []) {
-  const total = history.length;
+    const total = history.length;
   const uniquePartners = new Set();
   const dayCounts = new Map();
   let latest = 0;
@@ -313,7 +820,7 @@ function computeStats(history = []) {
         latest = Math.max(latest, raw);
       }
     }
-     });
+      });
 
   const todayStamp = toDayStamp(Date.now());
   let streak = 0;
@@ -323,7 +830,7 @@ function computeStats(history = []) {
       streak += 1;
       cursor -= DAY_MS;
     }
-     }
+      }
 
   const todayCount = todayStamp !== null ? (dayCounts.get(todayStamp) || 0) : 0;
 
@@ -341,6 +848,7 @@ function computeStats(history = []) {
 function resolveLevel(xp) {
   let current = LEVELS[0];
   let next = LEVELS[LEVELS.length - 1];
+
   for (let i = 0; i < LEVELS.length; i += 1) {
     const lvl = LEVELS[i];
     if (xp >= lvl.xp) {
@@ -350,7 +858,7 @@ function resolveLevel(xp) {
             next = lvl;
       break;
     }
-     }
+      }
 
   const sameLevel = next.level === current.level;
   const span = sameLevel ? Math.max(1, current.xp || 1) : Math.max(1, next.xp - current.xp);
@@ -376,16 +884,17 @@ function renderQuests(stats) {
     },
     {
       id: "friends",
-      label: "Познакомься с 5 друзьями",
-      progress: Math.min(1, stats.unique / 5),
-      current: stats.unique,
-      target: 5,
+       label: "Познакомься с 5 друзьями",
+       progress: Math.min(1, stats.unique / 5),
+       current: stats.unique,
+        target: 5,
     },
     {
       id: "streak",
       label: "Держи серию 3 дня",
       progress: Math.min(1, stats.streak / 3),
-      current: stats.streak,
+     
+           current: stats.streak,
       target: 3,
     },
   ];
@@ -410,6 +919,10 @@ function renderQuests(stats) {
     }
     els.questList.appendChild(li);
   });
+  const incomplete = quests.filter(quest => quest.progress < 1).length;
+  if (els.questDropdown) {
+    els.questDropdown.classList.toggle("quest-dropdown--active", incomplete > 0);
+  }
 }
 function updateGamification(history = []) {
   const stats = computeStats(history);
@@ -427,7 +940,7 @@ function updateGamification(history = []) {
     } else {
       els.xpLabel.textContent = `${stats.xp} / ${level.next.xp} XP`;
     }
-    }
+      }
   if (els.streakLabel) {
     els.streakLabel.textContent = `🔥 ${stats.streak}`;
   }
@@ -446,10 +959,14 @@ function setStatus(text) {
     els.status.textContent = text || "";
   }
 }
-function setPartner(text) {
-  if (els.partner) {
-    els.partner.textContent = text || "";
+function setPartner(content) {
+  if (!els.partner) return;
+  if (content instanceof Node) {
+    els.partner.innerHTML = "";
+    els.partner.appendChild(content);
+    return;
   }
+  els.partner.textContent = content || "";
 }
 const DEFAULT_DROP_SHADOW = "drop-shadow(0 12px 18px rgba(0,0,0,0.45))";
 
@@ -470,8 +987,7 @@ function applyDesign(design) {
     } else {
       els.bottle.classList.add("visual--bottle");
     }
-    const ariaPrefix = cfg.visual === "mug" ? "Пиксельная кружка" : "Пиксельная бутылочка";
-    els.bottle.setAttribute("aria-label", `${ariaPrefix} ${cfg.label}`.trim());
+        els.bottle.setAttribute("aria-label", `Пиксельная бутылочка ${cfg.label}`.trim());
     els.bottle.style.filter = DEFAULT_DROP_SHADOW;
   }
   if (els.designOptions) {
@@ -497,7 +1013,7 @@ function applyTheme(name) {
   if (els.card) {
     els.card.style.setProperty("--bg-img", fallbackCss);
   }
-  resolveBackground(themeName)
+   resolveBackground(themeName)
     .then((path) => {
       const css = toCssUrl(path);
       document.body.style.setProperty("--bg-img", css);
@@ -695,9 +1211,15 @@ try {
     }
     if (result?.partner) {
       renderPartner(result.partner);
-      await loadProfile();
-      await loadHistory();
-      setStatus("Готов к чок 🥂");
+  
+  
+  
+  
+  
+       await loadProfile();
+        await loadHistory();
+      
+            setStatus("Готов к чок 🥂");
       return;
     }
     if (result?.status === "already_today") {
@@ -722,6 +1244,11 @@ try {
 
 async function startListening() {
   if (state.listening) return;
+  if (!state.profile) {
+    setStatus("Сначала заполни анкету в мини-аппе");
+    showEdit(true);
+    return;
+  }
   const granted = await ensureMotionPermission();
   if (!granted) {
     setStatus("Разреши доступ к датчикам движения");
@@ -742,20 +1269,30 @@ async function loadProfile() {
     const data = await requestJSON("/api/profile/me");
     const profile = data?.profile || null;
     state.profile = profile;
+    state.profileRequired = !profile;
+    if (profile) {
+      state.guideComplete = true;
+    }
+    applyContactAutofill(profile);
+    if (els.editBtn) {
+      els.editBtn.dataset.required = profile ? "false" : "true";
+    }
+    if (els.shakeBtn) {
+      els.shakeBtn.disabled = !profile;
+    }
+    updateGuideVisibility();
     updateUsernameDisplay(profile);
     if (!profile) {
       setPartner("");
-      if (els.fillInChatBtn) {
-        els.fillInChatBtn.style.display = "";
-      }
+            state.customMoodValue = "";
+      setMoodIndex(0);
+      setStatus("Заполни анкету в мини-аппе, чтобы начать чокаться");
       showEdit(true);
+      if (els.nameInput && document.activeElement !== els.nameInput) {
+        els.nameInput.focus({ preventScroll: false });
+      }
       return;
     }
-
-    if (els.fillInChatBtn) {
-      els.fillInChatBtn.style.display = "none";
-    }
-
     if (els.nameInput && !els.nameInput.value) {
       els.nameInput.value = profile.name || "";
     }
@@ -766,11 +1303,11 @@ async function loadProfile() {
         els.ageInput.value = profile.age21 ? 21 : 20;
       }
     }
-    if (els.moodInput && !els.moodInput.value) {
-      els.moodInput.value = profile.mood || "";
-    }
-    if (els.contactInput && !els.contactInput.value && profile.contact) {
-      els.contactInput.value = profile.contact;
+       const isEditing = els.editBlock?.dataset.state === "open";
+    if (!isEditing) {
+      applyProfileMood(profile.mood || "");
+    } else if (els.moodInput && !els.moodInput.value && profile.mood) {
+      applyProfileMood(profile.mood);
     }
 
     const design = profile.design || state.selectedDesign;
@@ -783,6 +1320,20 @@ async function loadProfile() {
     }
   } catch (error) {
     console.warn("loadProfile", error);
+    if (state.profile === undefined) {
+      state.profile = null;
+      state.profileRequired = true;
+      if (els.editBtn) {
+        els.editBtn.dataset.required = "true";
+      }
+      if (els.shakeBtn) {
+        els.shakeBtn.disabled = true;
+      }
+      updateGuideVisibility();
+      showEdit(true);
+    }
+    applyContactAutofill(null);
+    setStatus("Не удалось загрузить анкету");
   }
 }
 
@@ -791,15 +1342,38 @@ function renderPartner(partner) {
     setPartner("");
     return;
   }
-  if (partner.withName || partner.withUsername) {
     const name = partner.withName || partner.name || "Гость";
-    const username = partner.withUsername || partner.username;
-    setPartner(`Вы чокнулись с ${name}${username ? ` (@${username})` : ""}`);
-  } else {
-    const name = partner.name || "Гость";
-    const username = partner.username ? ` (@${partner.username})` : "";
-    setPartner(`Вы чокнулись с ${name}${username}`);
+  const usernameRaw = partner.withUsername || partner.username || partner.tgUsername || null;
+  const username = formatUsername(usernameRaw);
+  const contact = formatContactValue(
+    partner.contact || partner.withContact || partner.instagram || ""
+  );
+
+  const fragment = document.createDocumentFragment();
+  const headline = document.createElement("span");
+  headline.className = "partner-line__headline";
+  headline.append("Вы чокнулись с ");
+  const nameEl = document.createElement("span");
+  nameEl.className = "partner-line__name";
+  nameEl.textContent = name;
+  headline.appendChild(nameEl);
+  if (username) {
+    const usernameEl = document.createElement("span");
+    usernameEl.className = "partner-line__username";
+    usernameEl.textContent = username;
+    headline.append(" ");
+    headline.appendChild(usernameEl);
   }
+  fragment.appendChild(headline);
+
+  if (contact) {
+    const contactEl = document.createElement("span");
+    contactEl.className = "partner-line__contact";
+    contactEl.textContent = contact;
+    fragment.appendChild(contactEl);
+  }
+
+  setPartner(fragment);
 }
 
 async function loadHistory() {
@@ -810,9 +1384,56 @@ async function loadHistory() {
     els.historyList.innerHTML = "";
     history.forEach(entry => {
       const li = document.createElement("li");
-      const username = entry.withUsername ? ` (@${entry.withUsername})` : "";
-      const when = entry.at ? new Date(entry.at).toLocaleString() : "";
-      li.textContent = `${entry.withName}${username}${when ? ` — ${when}` : ""}`;
+            li.classList.add("history-item");
+      const name = entry.withName || entry.name || "Гость";
+      const username = formatUsername(entry.withUsername || entry.username || null);
+      const contact = formatContactValue(entry.contact || entry.withContact || "");
+      let whenText = "";
+      let whenDate = null;
+      if (entry.at) {
+        const parsed = new Date(entry.at);
+        if (!Number.isNaN(parsed.getTime())) {
+          whenDate = parsed;
+          whenText = parsed.toLocaleString();
+        }
+      }
+
+      const header = document.createElement("div");
+      header.className = "history-item__header";
+
+      const identity = document.createElement("div");
+      identity.className = "history-item__identity";
+      const nameEl = document.createElement("span");
+      nameEl.className = "history-item__name";
+      nameEl.textContent = name;
+      identity.appendChild(nameEl);
+      if (username) {
+        const usernameEl = document.createElement("span");
+        usernameEl.className = "history-item__username";
+        usernameEl.textContent = username;
+        identity.appendChild(usernameEl);
+      }
+      header.appendChild(identity);
+
+      if (whenText) {
+        const timeEl = document.createElement("time");
+        timeEl.className = "history-item__time";
+        timeEl.textContent = whenText;
+        if (whenDate) {
+          timeEl.dateTime = whenDate.toISOString();
+        }
+        header.appendChild(timeEl);
+      }
+
+      li.appendChild(header);
+
+      if (contact) {
+        const contactEl = document.createElement("span");
+        contactEl.className = "history-item__contact";
+        contactEl.textContent = contact;
+        li.appendChild(contactEl);
+      }
+
       els.historyList.appendChild(li);
     });
     updateGamification(history);
@@ -824,13 +1445,23 @@ async function loadHistory() {
 
 function showEdit(open) {
   if (!els.editBlock) return;
+  const required = state.profile === null;
+  const shouldOpen = required ? true : Boolean(open);
   els.editBlock.hidden = false;
-  els.editBlock.dataset.state = open ? "open" : "collapsed";
+    els.editBlock.dataset.state = shouldOpen ? "open" : "collapsed";
   if (els.saveProfileBtn) {
-    els.saveProfileBtn.textContent = open ? "Сохранить" : "Обновить настроение";
+        els.saveProfileBtn.textContent = required
+      ? "Сохранить анкету"
+      : shouldOpen
+        ? "Сохранить"
+        : "Обновить настроение";
   }
   if (els.cancelEditBtn) {
-    els.cancelEditBtn.style.display = open ? "" : "none";
+        if (required) {
+      els.cancelEditBtn.style.display = "none";
+    } else {
+      els.cancelEditBtn.style.display = shouldOpen ? "" : "none";
+    }
   }
 }
 
@@ -838,7 +1469,17 @@ async function saveProfile() {
   if (!els.nameInput || !els.ageInput || !els.moodInput || !els.contactInput) return;
   const nameValue = els.nameInput.value.trim() || state.profile?.name || "";
   const moodValue = els.moodInput.value.trim();
-  const contactValue = els.contactInput.value.trim() || state.profile?.contact || "";
+    const contactRaw = (state.autoContact && state.autoContact.trim())
+    || els.contactInput.value.trim()
+    || state.profile?.contact
+    || "";
+  const contactValue = formatContactValue(contactRaw) || contactRaw.trim();
+  if (contactValue && els.contactInput.value !== contactValue) {
+    els.contactInput.value = contactValue;
+  }
+  if (state.autoContact) {
+    state.autoContact = contactValue;
+  }
   const rawAge = els.ageInput.value.trim();
   let age = rawAge ? Number(rawAge) : undefined;
   if (!Number.isFinite(age)) {
@@ -872,20 +1513,25 @@ async function saveProfile() {
     setStatus("Добавь настроение ✨");
     return;
   }
-  
+    if (!contactValue) {
+    setStatus("Добавь контакт, чтобы мы передали его собеседнику");
+    return;
+  }
+
   try {
     const result = await saveProfilePayload(payload);
     if (result?.ok || result?.profile) {
       setStatus("Анкета обновлена ✅");
       showEdit(false);
-      els.fillInChatBtn && (els.fillInChatBtn.style.display = "none");
-      await loadProfile();
+            await loadProfile();
     }
   } catch (error) {
     console.error("saveProfile", error);
     setStatus("Не удалось сохранить анкету");
   }
-}async function saveDesign() {
+  }
+
+async function saveDesign() {
   try {
     const result = await saveDesignPayload(state.selectedDesign);
     if (result?.ok || result?.profile) {
@@ -934,10 +1580,28 @@ function initUsername() {
   updateUsernameDisplay(state.profile);
 }
 
+function initBotGuide() {
+  updateGuideVisibility();
+  els.botGuideStart?.addEventListener("click", () => {
+    startGuideConversation();
+  });
+  els.botGuideProceed?.addEventListener("click", () => {
+    if (!guideState.finished) {
+      finishGuideConversation();
+    }
+    if (typeof (tg?.HapticFeedback?.impactOccurred) === "function") {
+      tg.HapticFeedback.impactOccurred("medium");
+    }
+    showEdit(true);
+    els.nameInput?.focus();
+  });
+}
+
 function initButtons() {
   els.editBtn?.addEventListener("click", () => {
-    if (els.fillInChatBtn && els.fillInChatBtn.style.display !== "none") {
-      openBot();
+       if (state.profile === null) {
+      showEdit(true);
+      els.nameInput?.focus();
       return;
     }
     const isOpen = els.editBlock?.dataset.state === "open";
@@ -945,6 +1609,7 @@ function initButtons() {
   });
 
   els.cancelEditBtn?.addEventListener("click", () => {
+    if (state.profile === null) return;
     showEdit(false);
   });
 
@@ -952,9 +1617,6 @@ function initButtons() {
     event.preventDefault();
     saveProfile();
   });
-
-  els.fillInChatBtn?.addEventListener("click", openBot);
-
   els.friendsBtn?.addEventListener("click", async () => {
     await loadHistory();
     setStatus("Показана история чоков 📜");
@@ -980,14 +1642,19 @@ async function init() {
   initUsername();
   initThemeSelect();
   initDesignCards();
+  initMoodCarousel();
+  applyContactAutofill(null);
   showEdit(false);
   primeBackgrounds();
+  initBotGuide();
   initButtons();
   initMotionListener();
 
   await loadProfile();
   updateGamification([]);
   await loadHistory();
-  setStatus("Готов к чок 🥂");
+   if (state.profile) {
+    setStatus("Готов к чок 🥂");
+  }
 }
 init();

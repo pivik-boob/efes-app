@@ -14,20 +14,114 @@ app.use(express.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 10000;
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // e.g. https://efes-app.onrender.com
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'efes_secret';
-
 // ---------- Prisma ----------
 const prisma = new PrismaClient();
 
 // ---------- Helpers: sync Telegram username (no auto-create) ----------
+const USERNAME_HANDLE_REGEX = /^[a-zA-Z0-9_]{3,32}$/;
+
+function normalizeContact(value) {
+  if (!value) return '';
+  const trimmed = String(value).trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('@')) return trimmed;
+  if (USERNAME_HANDLE_REGEX.test(trimmed)) return `@${trimmed}`;
+  return trimmed;
+}
+
+function resolveProfileContact(profile) {
+  if (!profile) return '';
+  if (profile.contact && profile.contact.trim()) return profile.contact.trim();
+  if (profile.instagram && profile.instagram.trim()) return profile.instagram.trim();
+  if (profile.tgUsername) return normalizeContact(profile.tgUsername);
+  return '';
+}
+
 async function syncTgUsername(userId, tgUser) {
   try {
     const uname = tgUser?.username || null;
     const p = await prisma.profile.findUnique({ where: { userId } });
-    if (p && p.tgUsername !== uname) {
-      await prisma.profile.update({ where: { userId }, data: { tgUsername: uname } });
+       if (!p) return;
+    const updates = {};
+    if (p.tgUsername !== uname) {
+      updates.tgUsername = uname;
+    }
+    if (uname && (!p.contact || !p.contact.trim())) {
+      const handle = normalizeContact(uname);
+      if (handle) {
+        updates.contact = handle;
+        updates.instagram = handle;
+      }
+    }
+    if (Object.keys(updates).length) {
+      await prisma.profile.update({ where: { userId }, data: updates });
     }
   } catch (_) {}
+}
+
+function coerceAge(age) {
+  if (age === undefined || age === null) return null;
+  const numeric = Number(age);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < 0) return null;
+  return Math.floor(numeric);
+}
+
+function pickProfileFields(body = {}, tgUser = null) {
+  const rawName = typeof body.name === 'string' ? body.name.trim() : '';
+  const rawMood = typeof body.mood === 'string' ? body.mood.trim() : '';
+  const rawContact = normalizeContact(body.contact || body.instagram || '');
+  const age = coerceAge(body.age);
+  const tgHandle = normalizeContact(tgUser?.username || '');
+
+  const contact = rawContact || tgHandle || '';
+
+  return {
+    name: rawName,
+    mood: rawMood,
+    age,
+    contact,
+    tgUsername: tgUser?.username || null,
+  };
+}
+
+async function upsertProfileFromWebApp(userId, body, tgUser) {
+  const existing = await prisma.profile.findUnique({ where: { userId } });
+  const fields = pickProfileFields(body, tgUser);
+
+  const name = (fields.name || existing?.name || 'Гость').slice(0, 120);
+  const mood = (((fields.mood ?? existing?.mood) || '')).slice(0, 160);
+  const contactSource = fields.contact || existing?.contact || normalizeContact(existing?.tgUsername) || '';
+  const contact = contactSource.slice(0, 120);
+
+  const data = {
+    name,
+    age: fields.age ?? existing?.age ?? 21,
+    mood,
+    contact,
+    instagram: contact,
+    tgUsername: fields.tgUsername,
+  };
+
+  if (existing) {
+    return prisma.profile.update({ where: { userId }, data });
+  }
+
+  return prisma.profile.create({
+    data: {
+      ...data,
+      userId,
+      design: 'classic',
+    },
+  });
+}
+
+function computeDayKey(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function makePairKey(a, b) {
+  return [String(a), String(b)].sort().join(':');
 }
 
 // ---------- Optional Redis (for fast matching), with safe fallback ----------
@@ -117,7 +211,7 @@ app.get('/api/profile/me', authMiddleware, async (req, res) => {
   try {
     await syncTgUsername(req.userId, req.tgUser);
     const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
-    // ВАЖНО: не создаём автоматически — чтобы WebApp мог показать кнопку «Заполнить в чате»
+        // Профиль создаётся после сохранения данных в мини-аппе
     if (!p) return res.json({ profile: null });
     res.json({ profile: p });
   } catch (e) {
@@ -125,54 +219,44 @@ app.get('/api/profile/me', authMiddleware, async (req, res) => {
     res.status(500).json({ ok: false });
   }
 });
-
-// Save/Upsert profile (поддерживает insta → contact)
-app.post('/api/profile/save', authMiddleware, async (req, res) => {
+// Update profile strictly via the Mini App
+app.post('/api/profile/update', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
-    const { name, age, mood, contact, insta } = req.body || {};
-
-    const dataUpdate = {};
-    if (name) dataUpdate.name = String(name).slice(0, 120);
-    if (age) dataUpdate.age = Number(age);
-    if (mood) dataUpdate.mood = String(mood).slice(0, 120);
-    if (contact || insta) dataUpdate.contact = String(contact || insta).slice(0, 120);
-
-    const p = await prisma.profile.upsert({
-      where: { userId },
-      create: {
-        userId,
-        name: dataUpdate.name || 'Гость',
-        age: dataUpdate.age || 21,
-        mood: dataUpdate.mood || '',
-        contact: dataUpdate.contact || '',
-        design: 'classic'
-      },
-      update: dataUpdate,
-    });
-
-    res.json({ ok: true, profile: p });
+       const profile = await upsertProfileFromWebApp(userId, req.body || {}, req.tgUser);
+    res.json({ ok: true, profile });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false });
   }
 });
-
+// Legacy endpoint kept to signal chat-based flows are disabled
+app.post('/api/profile/save', authMiddleware, (_req, res) => {
+  res.status(410).json({ ok: false, error: 'profile_editing_available_only_in_mini_app' });
+});
 // Set design (совместимая точка)
-app.post('/api/profile/design', authMiddleware, async (req, res) => {
-  try {
-    const userId = req.userId;
-    const { design } = req.body || {};
-    if (!design) return res.status(400).json({ ok: false, error: 'design required' });
+  app.post('/api/profile/design', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { design } = req.body || {};
+      if (!design) return res.status(400).json({ ok: false, error: 'design required' });
 
-    const p = await prisma.profile.upsert({
-      where: { userId },
-      create: { userId, name: 'Гость', age: 18, mood: '', contact: '', design },
-      update: { design },
-    });
-    res.json({ ok: true, profile: p });
-  } catch (e) {
-    console.error(e);
+      const p = await prisma.profile.upsert({
+        where: { userId },
+        create: {
+          userId,
+          name: 'Гость',
+          age: 21,
+          mood: '',
+          contact: '',
+          instagram: '',
+          design,
+        },
+        update: { design },
+      });
+      res.json({ ok: true, profile: p });
+    } catch (e) {
+      console.error(e);
     res.status(500).json({ ok: false });
   }
 });
@@ -198,10 +282,11 @@ async function popWaiting() {
     const val = await redis.get(key);
     if (val) {
       await redis.del(key);
-      try { return JSON.parse(val); } catch { return null; }
+       try { return JSON.parse(val); } catch { return null; }
     }
     return null;
-  } else {
+
+   } else {
     const v = memoryQueue.waiting;
     if (v && v.expire >= Date.now()) {
       memoryQueue.waiting = null;
@@ -226,30 +311,32 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
     if (other && Math.abs(now - other.ts) <= MATCH_WINDOW_MS && other.userId !== userId) {
       // нашли пару → фиксируем знакомство в БД
       const partnerId = other.userId;
-
-      // one-per-day rule (пара только раз в сутки)
-      const start = new Date(); start.setHours(0,0,0,0);
-      const end = new Date();   end.setHours(23,59,59,999);
-
-      const already = await prisma.meeting.findFirst({
-        where: {
-          createdAt: { gte: start, lte: end },
-          OR: [
-            { aId: userId, bId: partnerId },
-            { aId: partnerId, bId: userId },
-          ]
-        }
+      const dayKey = computeDayKey();
+      const pairKey = makePairKey(userId, partnerId);
+           const already = await prisma.meeting.findUnique({
+        where: { pairKey_dayKey: { pairKey, dayKey } },
       });
       if (already) return res.json({ status: 'already_today' });
-
-      await prisma.meeting.create({ data: { aId: userId, bId: partnerId } });
-
-      // возвращаем данные партнёра (имя + username), без системы баллов
+      await prisma.meeting.create({
+        data: {
+          userAId: userId,
+          userBId: partnerId,
+          pairKey,
+          dayKey,
+        },
+      });
+      // возвращаем данные партнёра (имя + username)
       const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
+      const partnerContact = resolveProfileContact(partner);
 
       return res.json({
         status: 'matched',
-        other: { id: partnerId, name: partner?.name || 'Гость', username: partner?.tgUsername || null, contact: partner?.contact || '' }
+                other: {
+          id: partnerId,
+          name: partner?.name || 'Гость',
+          username: partner?.tgUsername || null,
+          contact: partnerContact,
+        }
       });
 
     } else {
@@ -272,17 +359,17 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
 
     const list = await prisma.meeting.findMany({
       where: {
-        createdAt: { gte: from, lte: to },
-        OR: [{ aId: userId }, { bId: userId }]
+            metAt: { gte: from, lte: to },
+        OR: [{ userAId: userId }, { userBId: userId }]
       },
-      orderBy: { createdAt: 'desc' }
+            orderBy: { metAt: 'desc' }
     });
 
     const items = [];
     for (const m of list) {
-      const otherId = m.aId === userId ? m.bId : m.aId;
+              const otherId = m.userAId === userId ? m.userBId : m.userAId;
       const p = await prisma.profile.findUnique({ where: { userId: otherId } });
-      items.push({ user_id: otherId, profile: p, at: m.createdAt });
+            items.push({ user_id: otherId, profile: p, at: m.metAt });
     }
     res.json({ ok: true, items });
   } catch (e) {
@@ -296,15 +383,21 @@ app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
     const list = await prisma.meeting.findMany({
-      where: { OR: [{ aId: userId }, { bId: userId }] },
-      orderBy: { createdAt: 'desc' },
+         where: { OR: [{ userAId: userId }, { userBId: userId }] },
+      orderBy: { metAt: 'desc' },
       take: 20
     });
     const history = [];
     for (const m of list) {
-      const otherId = m.aId === userId ? m.bId : m.aId;
+      const otherId = m.userAId === userId ? m.userBId : m.userAId;
       const p = await prisma.profile.findUnique({ where: { userId: otherId } });
-      history.push({ withId: otherId, withUsername: p?.tgUsername || null, withName: p?.name || otherId, at: m.createdAt });
+         history.push({
+        withId: otherId,
+        withUsername: p?.tgUsername || null,
+        withName: p?.name || otherId,
+        contact: resolveProfileContact(p),
+        at: m.metAt,
+      });
     }
     res.json({ ok: true, history });
   } catch (e) {
@@ -312,181 +405,11 @@ app.get('/api/history', authMiddleware, async (req, res) => {
     res.status(500).json({ ok: false });
   }
 });
-
-// ---------- Gift codes ----------
-app.post('/api/gift/create', authMiddleware, async (req, res) => {
-  try {
-    const { message } = req.body || {};
-    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-    await prisma.giftCode.create({ data: { code, status: 'NEW', message: message || null } });
-    res.json({ ok: true, code, link: `${PUBLIC_URL}/gift/${code}` });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false });
-  }
-});
-
-app.get('/gift/:code', async (req, res) => {
-  try {
-    const code = req.params.code;
-    const g = await prisma.giftCode.findUnique({ where: { code } });
-    if (!g) return res.status(404).send('Код не найден');
-    res.send(`Подарочный код ${code}. Статус: ${g.status}`);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Ошибка сервера');
-  }
-});
-
-// совместимость: оба варианта погашения
-app.post('/gift/:code/redeem', async (req, res) => {
-  try {
-    const code = req.params.code;
-    const g = await prisma.giftCode.findUnique({ where: { code } });
-    if (!g) return res.status(404).send('Код не найден');
-    if (g.status === 'USED') return res.send('Код уже использован.');
-
-    await prisma.giftCode.update({ where: { code }, data: { status: 'USED', usedAt: new Date() } });
-    res.send('Код успешно погашен ✅');
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Ошибка сервера');
-  }
-});
-
-app.post('/api/gift/redeem', express.urlencoded({ extended: true }), async (req, res) => {
-  try {
-    const code = req.body.code;
-    const g = await prisma.giftCode.findUnique({ where: { code } });
-    if (!g) return res.status(404).send('Код не найден');
-    if (g.status === 'USED') return res.send('Код уже использован.');
-
-    await prisma.giftCode.update({ where: { code }, data: { status: 'USED', usedAt: new Date() } });
-    res.send('Код успешно погашен ✅');
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Ошибка сервера');
-  }
-});
-
-// ---------- Bot (Telegraf webhook) ----------
-async function initBot() {
-  console.log('Bot: initBot() start');
-  if (!BOT_TOKEN)  { console.log('Bot: DISABLED (no TELEGRAM_BOT_TOKEN)'); return; }
-  if (!PUBLIC_URL) { console.log('Bot: PUBLIC_URL is empty — webhook cannot be set'); return; }
-
-  const { Telegraf } = require('telegraf');
-  const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 9000 });
-
-  const webAppUrl = PUBLIC_URL || '';
-  const userStates = new Map(); // анкета в памяти (простая)
-
-  // --- /start: приветствие + автозапуск анкеты для новых пользователей ---
-  bot.start(async (ctx) => {
-    try {
-      const uid = String(ctx.from.id);
-      const displayName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || ctx.from.username || 'друг';
-
-      // тёплое приветствие Пивика
-      await ctx.reply(
-        `Привет, ${displayName}! 😄\n\n` +
-        `Я Пивик — твой ассистент в мире Эфеса 🍻\n` +
-        `Помогу создать твою цифровую бутылочку и чокаться с друзьями!`,
-        {
-          reply_markup: {
-            inline_keyboard: [[{ text: 'Открыть цифровую бутылочку', web_app: { url: webAppUrl } }]]
-          }
-        }
-      );
-
-      const p = await prisma.profile.findUnique({ where: { userId: uid } });
-      if (p) {
-        // профиль уже есть — ничего больше не спрашиваем
-        return;
-      }
-
-      // профиля нет — сразу запускаем анкету
-      userStates.set(ctx.from.id, { step: 'name', draft: {} });
-      await ctx.reply('Давай создадим твою бутылочку! Как тебя зовут?');
-    } catch (e) {
-      console.error('profile check on /start:', e);
-    }
-  });
-
-  // --- Анкета (всегда доступна для новых; простая последовательность) ---
-  bot.on('text', async (ctx) => {
-    const st = userStates.get(ctx.from.id);
-    if (!st) return; // не в анкете — игнор
-
-    const text = (ctx.message.text || '').trim();
-    const uid  = String(ctx.from.id);
-
-    if (st.step === 'name') {
-      st.draft.name = text.slice(0,120);
-      st.step = 'age';
-      return ctx.reply('Отлично! Сколько тебе лет? (числом, 21–120)');
-    }
-
-    if (st.step === 'age') {
-      const n = Number(text);
-      if (!Number.isInteger(n) || n < 21 || n > 120)
-        return ctx.reply('Введи число от 21 до 120 🙂');
-      st.draft.age = n;
-      st.step = 'mood';
-      return ctx.reply('Какое у тебя настроение? (например: 🙂, 😎, 🎉)');
-    }
-
-    if (st.step === 'mood') {
-      st.draft.mood = text.slice(0,32);
-      st.step = 'contact';
-      return ctx.reply('Оставь Instagram (без @) или любой контакт (можно пропустить, напиши «пропустить»).');
-    }
-
-    if (st.step === 'contact') {
-      if (!/пропусти|skip/i.test(text)) st.draft.contact = text.slice(0,120);
-      try {
-        await prisma.profile.upsert({
-          where:  { userId: uid },
-          create: { userId: uid, name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact || '', design: 'classic', tgUsername: ctx.from.username || null },
-          update: { name: st.draft.name, age: st.draft.age, mood: st.draft.mood, contact: st.draft.contact || '', tgUsername: ctx.from.username || null }
-        });
-        userStates.delete(ctx.from.id);
-        await ctx.reply(
-          'Готово! Открывай мини-апп и чокайся 🥂',
-          { reply_markup: { inline_keyboard: [[{ text: 'Открыть карту', web_app: { url: webAppUrl } }]] } }
-        );
-      } catch (e) {
-        console.error('upsert profile from bot failed:', e);
-        await ctx.reply('Упс, не сохранилось. Попробуй ещё раз /start.');
-      }
-    }
-  });
-
-  // Доп. меню (по желанию)
-  bot.action('open_bottle', async (ctx) => {
-    await ctx.reply('Открываю твою бутылочку 🍺', {
-      reply_markup: { inline_keyboard: [[{ text: 'Открыть', web_app: { url: webAppUrl } }]] }
-    });
-    await ctx.answerCbQuery();
-  });
-
-  bot.action('main_menu', async (ctx) => {
-    await ctx.reply('Главное меню 📋', {
-      reply_markup: { inline_keyboard: [[{ text: 'Открыть цифровую бутылочку', web_app: { url: webAppUrl } }]] }
-    });
-    await ctx.answerCbQuery();
-  });
-
-  // --- webhook ---
-  const webhookPath = `/bot/${WEBHOOK_SECRET}`;
-  app.use(bot.webhookCallback(webhookPath));
-  await bot.telegram.setWebhook(`${PUBLIC_URL}${webhookPath}`);
-  console.log('Bot: webhook set to', `${PUBLIC_URL}${webhookPath}`);
-}
-
 // ---------- Start ----------
 app.listen(PORT, () => {
   console.log(`Efes app listening on :${PORT}`);
   if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
-  initBot().catch(err => console.error('Bot init failed:', err));
+  if (BOT_TOKEN) {
+    console.log('Telegram bot webhook is disabled in this build. (JS bot not in use)');
+  }
 });
