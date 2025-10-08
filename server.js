@@ -40,15 +40,26 @@ const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}`
 // ---------- Prisma ----------
 const DATABASE_URL = process.env.DATABASE_URL;
 
+
+
+
+
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
+
+
+
+
+
+
 
 function createFileStoreClient(reason = 'no DATABASE_URL') {
   const defaults = { profiles: {}, meetings: [] };
   let cache = null;
   let loadPromise = null;
   let writeChain = Promise.resolve();
-
+  const allowedProfileKeys = new Set(['userId', 'name', 'tgUsername', 'age', 'mood', 'design']);
+  
   async function ensureLoaded() {
     if (cache) return cache;
     if (!loadPromise) {
@@ -113,14 +124,16 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
         const store = await ensureLoaded();
         const existing = store.profiles[where.userId];
         if (!existing) throw new Error('Profile not found');
-        const updated = {
+        const merged = {
           ...existing,
           ...data,
           userId: where.userId,
-          updatedAt: new Date().toISOString(),
         };
-        store.profiles[where.userId] = updated;
-        return { ...updated };
+        const sanitized = Object.fromEntries(
+          Object.entries(merged).filter(([key]) => allowedProfileKeys.has(key)),
+        );
+        store.profiles[where.userId] = sanitized;
+        return { ...sanitized };
       });
     },
     async create({ data }) {
@@ -128,13 +141,15 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
       if (!userId) throw new Error('userId is required');
       return withWrite(async () => {
         const store = await ensureLoaded();
-        const created = {
+        const merged = {
           ...data,
           userId,
-          updatedAt: new Date().toISOString(),
         };
-        store.profiles[userId] = created;
-        return { ...created };
+         const sanitized = Object.fromEntries(
+          Object.entries(merged).filter(([key]) => allowedProfileKeys.has(key)),
+        );
+        store.profiles[userId] = sanitized;
+        return { ...sanitized };
       });
     },
     async upsert({ where, create, update }) {
@@ -235,33 +250,22 @@ if (process.env.DATABASE_URL) {
 
 async function ensurePostgresSchema(prismaClient) {
   const statements = [
-    `CREATE TABLE IF NOT EXISTS "Profile" (
-      "userId" TEXT PRIMARY KEY,
-      "tgUsername" TEXT,
-      "name" TEXT NOT NULL,
-      "age21" BOOLEAN,
+      `CREATE TABLE IF NOT EXISTS "app_user" (
+      "telegram_id" TEXT PRIMARY KEY,
+      "username" TEXT,
+      "name" TEXT NOT NULL DEFAULT 'Гость',
       "age" INTEGER,
-      "instagram" TEXT,
-      "contact" TEXT,
-      "mood" TEXT DEFAULT '🙂',
-      "design" TEXT DEFAULT 'classic',
-      "photoFileId" TEXT,
-      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      "mood" TEXT NOT NULL DEFAULT '🙂',
+      "design" TEXT NOT NULL DEFAULT 'classic'
     )`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "tgUsername" TEXT`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "name" TEXT NOT NULL DEFAULT 'Гость'`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "age21" BOOLEAN`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "age" INTEGER`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "instagram" TEXT`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "contact" TEXT`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "mood" TEXT NOT NULL DEFAULT '🙂'`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "design" TEXT NOT NULL DEFAULT 'classic'`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "photoFileId" TEXT`,
-    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
-    `ALTER TABLE "Profile" ALTER COLUMN "name" SET DEFAULT 'Гость'`,
-    `ALTER TABLE "Profile" ALTER COLUMN "mood" SET DEFAULT '🙂'`,
-    `ALTER TABLE "Profile" ALTER COLUMN "design" SET DEFAULT 'classic'`,
-    `ALTER TABLE "Profile" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "username" TEXT`,
+    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "name" TEXT NOT NULL DEFAULT 'Гость'`,
+    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "age" INTEGER`,
+    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "mood" TEXT NOT NULL DEFAULT '🙂'`,
+    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "design" TEXT NOT NULL DEFAULT 'classic'`,
+    `ALTER TABLE "app_user" ALTER COLUMN "name" SET DEFAULT 'Гость'`,
+    `ALTER TABLE "app_user" ALTER COLUMN "mood" SET DEFAULT '🙂'`,
+    `ALTER TABLE "app_user" ALTER COLUMN "design" SET DEFAULT 'classic'`,
     `CREATE TABLE IF NOT EXISTS "Meeting" (
       "id" TEXT PRIMARY KEY,
       "userAId" TEXT NOT NULL,
@@ -276,44 +280,24 @@ async function ensurePostgresSchema(prismaClient) {
     `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "dayKey" TEXT`,
     `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "metAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
     `ALTER TABLE "Meeting" ALTER COLUMN "metAt" SET DEFAULT CURRENT_TIMESTAMP`,
-    `CREATE TABLE IF NOT EXISTS "GiftCode" (
-      "voucher" TEXT PRIMARY KEY,
-      "fromUserId" TEXT NOT NULL,
-      "toUserId" TEXT NOT NULL,
-      "message" TEXT,
-      "redeemed" BOOLEAN NOT NULL DEFAULT false,
-      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      "expiresAt" TIMESTAMP(3)
-    )`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "voucher" TEXT`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "fromUserId" TEXT`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "toUserId" TEXT`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "message" TEXT`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "redeemed" BOOLEAN NOT NULL DEFAULT false`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
-    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMP(3)`,
-    `ALTER TABLE "GiftCode" ALTER COLUMN "redeemed" SET DEFAULT false`,
-    `ALTER TABLE "GiftCode" ALTER COLUMN "createdAt" SET DEFAULT CURRENT_TIMESTAMP`,
+    `DO $$ BEGIN
+        ALTER TABLE "Meeting"
+        ADD CONSTRAINT "Meeting_userAId_fkey"
+        FOREIGN KEY ("userAId") REFERENCES "app_user"("telegram_id")
+        ON DELETE RESTRICT ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
+    `DO $$ BEGIN
+        ALTER TABLE "Meeting"
+        ADD CONSTRAINT "Meeting_userBId_fkey"
+        FOREIGN KEY ("userBId") REFERENCES "app_user"("telegram_id")
+        ON DELETE RESTRICT ON UPDATE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "Meeting_pairKey_dayKey_key" ON "Meeting" ("pairKey", "dayKey")`,
     `CREATE INDEX IF NOT EXISTS "Meeting_dayKey_idx" ON "Meeting" ("dayKey")`,
     `CREATE INDEX IF NOT EXISTS "Meeting_userAId_metAt_idx" ON "Meeting" ("userAId", "metAt")`,
     `CREATE INDEX IF NOT EXISTS "Meeting_userBId_metAt_idx" ON "Meeting" ("userBId", "metAt")`,
-    `CREATE INDEX IF NOT EXISTS "GiftCode_fromUserId_idx" ON "GiftCode" ("fromUserId")`,
-    `CREATE INDEX IF NOT EXISTS "GiftCode_toUserId_idx" ON "GiftCode" ("toUserId")`,
-    `DO $$ BEGIN
-        ALTER TABLE "GiftCode"
-        ADD CONSTRAINT "GiftCode_fromUserId_fkey"
-        FOREIGN KEY ("fromUserId") REFERENCES "Profile"("userId")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-    END $$`,
-    `DO $$ BEGIN
-        ALTER TABLE "GiftCode"
-        ADD CONSTRAINT "GiftCode_toUserId_fkey"
-        FOREIGN KEY ("toUserId") REFERENCES "Profile"("userId")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-    END $$`,
   ];
 
   for (const sql of statements) {
@@ -333,14 +317,6 @@ function normalizeContact(value) {
   return trimmed;
 }
 
-function resolveProfileContact(profile) {
-  if (!profile) return '';
-  if (profile.contact && profile.contact.trim()) return profile.contact.trim();
-  if (profile.instagram && profile.instagram.trim()) return profile.instagram.trim();
-  if (profile.tgUsername) return normalizeContact(profile.tgUsername);
-  return '';
-}
-
 async function syncTgUsername(userId, tgUser) {
   try {
      const uname = tgUser?.username || null;
@@ -349,13 +325,6 @@ async function syncTgUsername(userId, tgUser) {
     const updates = {};
     if (p.tgUsername !== uname) {
       updates.tgUsername = uname;
-    }
-    if (uname && (!p.contact || !p.contact.trim())) {
-      const handle = normalizeContact(uname);
-      if (handle) {
-        updates.contact = handle;
-        updates.instagram = handle;
-      }
     }
     if (Object.keys(updates).length) {
       await db.profile.update({ where: { userId }, data: updates });
@@ -374,20 +343,26 @@ function coerceAge(age) {
 function pickProfileFields(body = {}, tgUser = null) {
   const rawName = typeof body.name === 'string' ? body.name.trim() : '';
   const rawMood = typeof body.mood === 'string' ? body.mood.trim() : '';
-  const rawContact = normalizeContact(body.contact || body.instagram || '');
   const age = coerceAge(body.age);
-  const tgHandle = normalizeContact(tgUser?.username || '');
   const rawDesign = typeof body.design === 'string' ? body.design.trim() : '';
-  const contact = rawContact || tgHandle || '';
 
   return {
     name: rawName,
     mood: rawMood,
     age,
-    contact,
     tgUsername: tgUser?.username || null,
     design: rawDesign,
   };
+}
+
+function deriveProfileContact(profile) {
+  if (!profile?.tgUsername) return '';
+  return normalizeContact(profile.tgUsername);
+}
+
+function decorateProfile(profile) {
+  if (!profile) return null;
+  return { ...profile, contact: deriveProfileContact(profile) };
 }
 
 async function upsertProfileFromWebApp(userId, body, tgUser) {
@@ -396,30 +371,28 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
 
   const name = (fields.name || existing?.name || 'Гость').slice(0, 120);
   const mood = (((fields.mood ?? existing?.mood) || '')).slice(0, 160);
-  const contactSource = fields.contact || existing?.contact || normalizeContact(existing?.tgUsername) || '';
-  const contact = contactSource.slice(0, 120);
   const designSource = fields.design || existing?.design || 'classic';
   const design = String(designSource || 'classic').slice(0, 60);
   const data = {
     name,
     age: fields.age ?? existing?.age ?? 21,
     mood,
-    contact,
-    instagram: contact,
     tgUsername: fields.tgUsername,
-    design,  
+    design,
   };
 
   if (existing) {
-    return db.profile.update({ where: { userId }, data });
+    const record = await db.profile.update({ where: { userId }, data });
+    return decorateProfile(record);
   }
 
-  return db.profile.create({
+  const created = await db.profile.create({
     data: {
       ...data,
       userId,
     },
   });
+  return decorateProfile(created);
 }
 
 function computeDayKey(date = new Date()) {
@@ -611,7 +584,9 @@ async function ensureTelegramCommands() {
 
   const commands = [
     { command: 'start', description: 'Запустить мини-приложение Эфес' },
+
   ];
+
 
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/setMyCommands`, {
@@ -718,7 +693,6 @@ if (BOT_TOKEN) {
     res.status(503).json({ ok: false, error: 'bot_disabled' });
   });
 }
-
 // ---------- Health ----------
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
@@ -729,7 +703,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
     await syncTgUsername(String(uid), req.tgUser);
     const p = await db.profile.findUnique({ where: { userId: String(uid) } });
     if (!p) return res.json({ exists: false });
-    res.json({ exists: true, profile: p });
+    res.json({ exists: true, profile: decorateProfile(p) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false });
@@ -742,7 +716,7 @@ app.get('/api/profile/me', authMiddleware, async (req, res) => {
     const p = await db.profile.findUnique({ where: { userId: req.userId } });
         // Профиль создаётся после сохранения данных в мини-аппе
     if (!p) return res.json({ profile: null });
-    res.json({ profile: p });
+    res.json({ profile: decorateProfile(p) });
   } catch (e) {
    console.error(e);
     res.status(500).json({ ok: false });
@@ -777,13 +751,11 @@ app.post('/api/profile/save', authMiddleware, (_req, res) => {
           name: 'Гость',
           age: 21,
           mood: '',
-          contact: '',
-          instagram: '',
           design,
         },
         update: { design },
       });
-      res.json({ ok: true, profile: p });
+      res.json({ ok: true, profile: decorateProfile(p) });
     } catch (e) {
       console.error(e);
     res.status(500).json({ ok: false });
@@ -856,7 +828,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
       });
       // возвращаем данные партнёра (имя + username)
       const partner = await db.profile.findUnique({ where: { userId: partnerId } });
-      const partnerContact = resolveProfileContact(partner);
+      const partnerContact = deriveProfileContact(partner);
 
       return res.json({
         status: 'matched',
@@ -898,7 +870,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     for (const m of list) {
               const otherId = m.userAId === userId ? m.userBId : m.userAId;
       const p = await db.profile.findUnique({ where: { userId: otherId } });
-            items.push({ user_id: otherId, profile: p, at: m.metAt });
+            items.push({ user_id: otherId, profile: decorateProfile(p), at: m.metAt });
     }
     res.json({ ok: true, items });
   } catch (e) {
@@ -924,7 +896,7 @@ app.get('/api/history', authMiddleware, async (req, res) => {
         withId: otherId,
         withUsername: p?.tgUsername || null,
         withName: p?.name || otherId,
-        contact: resolveProfileContact(p),
+        contact: deriveProfileContact(p),
         at: m.metAt,
       });
     }

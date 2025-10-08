@@ -10,46 +10,27 @@ datasource db {
   // directUrl = env("DATABASE_URL_UNPOOLED")
 }
 model Profile {
-  userId String @id
-   tgUsername String?
-   name String
-   age21 Boolean?
-    age Int?
-    instagram String?
-   contact String?
-   mood String? @default("🙂")
-   design String? @default("classic")
-   photoFileId String?
-   updatedAt DateTime @updatedAt
-    giftsFrom GiftCode[] @relation("GiftsFrom")
-    giftsTo   GiftCode[] @relation("GiftsTo")
+  userId     String  @id @map("telegram_id")
+  tgUsername String? @map("username")
+  name       String  @default("Гость")
+  age        Int?
+  mood       String? @default("🙂")
+  design     String? @default("classic")
 }
 
 model Meeting {
-    id String @id @default(cuid())
-    userAId String
-    userBId String
-    dayKey String
-    
-    pairKey String
-    
-    metAt DateTime @default(now())
-    
-    @@unique([pairKey, dayKey])
-    @@index([dayKey])
-    @@index([userAId, metAt])
-    @@index([userBId, metAt])
-}
+  id      String   @id @default(cuid())
+  userAId String
+  userBId String
+  dayKey  String
+  pairKey String
+  metAt   DateTime @default(now())
 
-model GiftCode {
-  voucher    String    @id
-  fromUserId String
-  toUserId   String
-  message    String?
-  redeemed   Boolean   @default(false)
-  createdAt  DateTime  @default(now())
-  expiresAt  DateTime?
-
-  from Profile @relation("GiftsFrom", fields: [fromUserId], references: [userId])
-  to   Profile @relation("GiftsTo", fields: [toUserId], references: [userId])
+  userA Profile @relation("MeetingsAsUserA", fields: [userAId], references: [userId])
+  userB Profile @relation("MeetingsAsUserB", fields: [userBId], references: [userId])
+  
+  @@unique([pairKey, dayKey])
+  @@index([dayKey])
+  @@index([userAId, metAt])
+  @@index([userBId, metAt])
 }
