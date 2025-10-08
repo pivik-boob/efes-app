@@ -4,13 +4,32 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
-const bodyParser = require('body-parser');
 const { PrismaClient } = require('@prisma/client');
 
 const app = express();
-app.use(bodyParser.json({ limit: '1mb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
-
+app.use((req, res, next) => {
+  if (typeof req.body === 'string') {
+    try {
+      req.body = JSON.parse(req.body);
+    } catch (_) {}
+  }
+  next();
+});
+app.use((req, res, next) => {
+  const started = Date.now();
+  const method = req.method;
+  const url = req.originalUrl || req.url;
+  console.log(`[${new Date().toISOString()}] → ${method} ${url}`);
+  res.on('finish', () => {
+    const duration = Date.now() - started;
+    console.log(
+      `[${new Date().toISOString()}] ← ${method} ${url} ${res.statusCode} ${duration}ms`,
+    );
+  });
+  next();
+});
 // ---------- Config ----------
 const PORT = process.env.PORT || 10000;
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // e.g. https://efes-app.onrender.com
@@ -18,8 +37,8 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook${TELEGRAM_WEBHOOK_SECRET ? `/${TELEGRAM_WEBHOOK_SECRET}` : ''}`;
 const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
-const MAP_URL = process.env.MAP_URL || '';
 // ---------- Prisma ----------
+const DATABASE_URL = process.env.DATABASE_URL;
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
