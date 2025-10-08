@@ -186,7 +186,7 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
     },
   };
 
-console.log(`Prisma: DISABLED (${reason}). Using JSON file store at`, DATA_FILE);
+  console.log(`Prisma: DISABLED (${reason}). Using JSON file store at`, DATA_FILE);
 
   return { profile, meeting };
 }
@@ -228,6 +228,20 @@ async function ensurePostgresSchema(prismaClient) {
       "photoFileId" TEXT,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "tgUsername" TEXT`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "name" TEXT NOT NULL DEFAULT 'Гость'`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "age21" BOOLEAN`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "age" INTEGER`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "instagram" TEXT`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "contact" TEXT`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "mood" TEXT NOT NULL DEFAULT '🙂'`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "design" TEXT NOT NULL DEFAULT 'classic'`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "photoFileId" TEXT`,
+    `ALTER TABLE "Profile" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE "Profile" ALTER COLUMN "name" SET DEFAULT 'Гость'`,
+    `ALTER TABLE "Profile" ALTER COLUMN "mood" SET DEFAULT '🙂'`,
+    `ALTER TABLE "Profile" ALTER COLUMN "design" SET DEFAULT 'classic'`,
+    `ALTER TABLE "Profile" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP`,
     `CREATE TABLE IF NOT EXISTS "Meeting" (
       "id" TEXT PRIMARY KEY,
       "userAId" TEXT NOT NULL,
@@ -236,6 +250,12 @@ async function ensurePostgresSchema(prismaClient) {
       "dayKey" TEXT NOT NULL,
       "metAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "userAId" TEXT`,
+    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "userBId" TEXT`,
+    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "pairKey" TEXT`,
+    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "dayKey" TEXT`,
+    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "metAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE "Meeting" ALTER COLUMN "metAt" SET DEFAULT CURRENT_TIMESTAMP`,
     `CREATE TABLE IF NOT EXISTS "GiftCode" (
       "voucher" TEXT PRIMARY KEY,
       "fromUserId" TEXT NOT NULL,
@@ -245,6 +265,15 @@ async function ensurePostgresSchema(prismaClient) {
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "expiresAt" TIMESTAMP(3)
     )`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "voucher" TEXT`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "fromUserId" TEXT`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "toUserId" TEXT`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "message" TEXT`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "redeemed" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE "GiftCode" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMP(3)`,
+    `ALTER TABLE "GiftCode" ALTER COLUMN "redeemed" SET DEFAULT false`,
+    `ALTER TABLE "GiftCode" ALTER COLUMN "createdAt" SET DEFAULT CURRENT_TIMESTAMP`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "Meeting_pairKey_dayKey_key" ON "Meeting" ("pairKey", "dayKey")`,
     `CREATE INDEX IF NOT EXISTS "Meeting_dayKey_idx" ON "Meeting" ("dayKey")`,
     `CREATE INDEX IF NOT EXISTS "Meeting_userAId_metAt_idx" ON "Meeting" ("userAId", "metAt")`,
@@ -328,7 +357,7 @@ function pickProfileFields(body = {}, tgUser = null) {
   const rawContact = normalizeContact(body.contact || body.instagram || '');
   const age = coerceAge(body.age);
   const tgHandle = normalizeContact(tgUser?.username || '');
-
+  const rawDesign = typeof body.design === 'string' ? body.design.trim() : '';
   const contact = rawContact || tgHandle || '';
 
   return {
@@ -337,6 +366,7 @@ function pickProfileFields(body = {}, tgUser = null) {
     age,
     contact,
     tgUsername: tgUser?.username || null,
+    design: rawDesign,
   };
 }
 
@@ -348,7 +378,8 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
   const mood = (((fields.mood ?? existing?.mood) || '')).slice(0, 160);
   const contactSource = fields.contact || existing?.contact || normalizeContact(existing?.tgUsername) || '';
   const contact = contactSource.slice(0, 120);
-
+  const designSource = fields.design || existing?.design || 'classic';
+  const design = String(designSource || 'classic').slice(0, 60);
   const data = {
     name,
     age: fields.age ?? existing?.age ?? 21,
@@ -356,6 +387,7 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
     contact,
     instagram: contact,
     tgUsername: fields.tgUsername,
+    design,  
   };
 
   if (existing) {
@@ -366,7 +398,6 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
     data: {
       ...data,
       userId,
-      design: 'classic',
     },
   });
 }
@@ -398,13 +429,8 @@ if (process.env.REDIS_URL) {
     console.log('Redis: DISABLED (no REDIS_URL). Using in-memory matching queue. Set REDIS_URL to enable Redis.');
 }
 
-// ---------- Telegram bot helpers ----------
-const START_KEYBOARD = {
-  keyboard: [[{ text: 'Карта' }]],
-  resize_keyboard: true,
-  is_persistent: true,
-};
 
+// ---------- Telegram bot helpers ----------
 function formatGreeting(message) {
   const firstName = message?.from?.first_name?.trim();
   const displayName = firstName || 'друг';
@@ -464,12 +490,10 @@ async function sendGreetingAndMiniApp(message) {
   if (!chatId) return;
 
   const greetingText = formatGreeting(message);
-  const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
     text: greetingText,
-    reply_markup: replyMarkup,
   });
 
   const miniAppButton = buildMiniAppButton();
@@ -477,7 +501,7 @@ async function sendGreetingAndMiniApp(message) {
     chat_id: chatId,
     text: miniAppButton
       ? 'Готов пройти анкету, выбрать настроение и чокнуться с другими гостями? Жми кнопку ниже!'
-      : 'Мини-приложение сейчас недоступно: администратору нужно настроить PUBLIC_URL.',
+      : 'Мини-приложение сейчас недоступно.',
   };
 
   if (miniAppButton) {
@@ -487,7 +511,6 @@ async function sendGreetingAndMiniApp(message) {
   await callTelegram('sendMessage', miniAppMessage);
 }
 
-
 async function handleTelegramUpdate(update) {
   if (!update) return;
 
@@ -496,8 +519,7 @@ async function handleTelegramUpdate(update) {
     if (message.web_app_data) {
       await callTelegram('sendMessage', {
         chat_id: message.chat.id,
-        text: 'Данные мини-приложения получены! Если хочешь начать сначала — напиши «/start».',
-      });
+        text: 'Данные мини-приложения получены! Если хочешь начать сначала — просто открой мини-приложение ещё раз.',      });
       return;
     }
     const rawText = typeof message.text === 'string' ? message.text.trim() : '';
@@ -514,11 +536,9 @@ async function handleTelegramUpdate(update) {
     }
 
     if (normalized) {
-      const replyMarkup = message?.chat?.type === 'private' ? START_KEYBOARD : undefined;
       await callTelegram('sendMessage', {
         chat_id: message.chat.id,
         text: 'Открой мини-приложение по кнопке выше, чтобы продолжить.',
-        reply_markup: replyMarkup,
       });
       return;
     }
@@ -569,10 +589,7 @@ async function ensureTelegramWebhook() {
 async function ensureTelegramCommands() {
   if (!TELEGRAM_API_BASE) return;
 
-  const commands = [
-    { command: 'start', description: 'Запустить мини-приложение Эфес' },
-    { command: 'map', description: 'Показать карту EFES' },
-  ];
+  const commands = [];
 
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/setMyCommands`, {
@@ -699,9 +716,9 @@ app.post('/api/profile/save', authMiddleware, (_req, res) => {
   app.post('/api/profile/design', authMiddleware, async (req, res) => {
     try {
       const userId = req.userId;
-      const { design } = req.body || {};
-      if (!design) return res.status(400).json({ ok: false, error: 'design required' });
-
+      const rawDesign = typeof req.body?.design === 'string' ? req.body.design.trim() : '';
+      if (!rawDesign) return res.status(400).json({ ok: false, error: 'design required' });
+      const design = rawDesign.slice(0, 60);
       const p = await prisma.profile.upsert({
         where: { userId },
         create: {
@@ -874,7 +891,7 @@ async function bootstrap() {
     console.error('Database initialization error:', err?.message || err);
   }
 
-    app.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`Efes app listening on :${PORT}`);
     if (!PUBLIC_URL) console.log('TIP: set PUBLIC_URL for QR links.');
     if (BOT_TOKEN) {
