@@ -39,6 +39,14 @@ const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook${TELEGRAM_WEBHOOK_SECRET ? `/${
 const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
 // ---------- Prisma ----------
 const DATABASE_URL = process.env.DATABASE_URL;
+
+const pool = new Pool({
+port: 5432
+ssl: {
+  require: true,
+}
+})
+
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
