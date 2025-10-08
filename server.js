@@ -40,13 +40,6 @@ const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}`
 // ---------- Prisma ----------
 const DATABASE_URL = process.env.DATABASE_URL;
 
-const pool = new Pool({
-port: 5432
-ssl: {
-  require: true,
-}
-})
-
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
@@ -616,7 +609,9 @@ async function ensureTelegramWebhook() {
 async function ensureTelegramCommands() {
   if (!TELEGRAM_API_BASE) return;
 
-  const commands = [];
+  const commands = [
+    { command: 'start', description: 'Запустить мини-приложение Эфес' },
+  ];
 
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/setMyCommands`, {
@@ -630,6 +625,35 @@ async function ensureTelegramCommands() {
     }
   } catch (err) {
     console.error('Failed to configure Telegram commands:', err?.message || err);
+  }
+}
+
+async function ensureTelegramMenuButton() {
+  if (!TELEGRAM_API_BASE) return;
+
+  const miniAppUrl = buildMiniAppLink();
+  if (!miniAppUrl) return;
+
+  const payload = {
+    menu_button: {
+      type: 'web_app',
+      text: 'Старт',
+      web_app: { url: miniAppUrl },
+    },
+  };
+
+  try {
+    const res = await fetch(`${TELEGRAM_API_BASE}/setChatMenuButton`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.error('Failed to set Telegram menu button:', data.description || data);
+    }
+  } catch (err) {
+    console.error('Failed to configure Telegram menu button:', err?.message || err);
   }
 }
 
@@ -715,7 +739,7 @@ app.get('/api/profile', authMiddleware, async (req, res) => {
 app.get('/api/profile/me', authMiddleware, async (req, res) => {
   try {
     await syncTgUsername(req.userId, req.tgUser);
-    const p = await prisma.profile.findUnique({ where: { userId: req.userId } });
+    const p = await db.profile.findUnique({ where: { userId: req.userId } });
         // Профиль создаётся после сохранения данных в мини-аппе
     if (!p) return res.json({ profile: null });
     res.json({ profile: p });
@@ -746,7 +770,7 @@ app.post('/api/profile/save', authMiddleware, (_req, res) => {
       const rawDesign = typeof req.body?.design === 'string' ? req.body.design.trim() : '';
       if (!rawDesign) return res.status(400).json({ ok: false, error: 'design required' });
       const design = rawDesign.slice(0, 60);
-      const p = await prisma.profile.upsert({
+      const p = await db.profile.upsert({
         where: { userId },
         create: {
           userId,
@@ -809,7 +833,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
     const now = Date.now();
 
     await syncTgUsername(userId, req.tgUser);
-    const self = await prisma.profile.findUnique({ where: { userId } });
+    const self = await db.profile.findUnique({ where: { userId } });
     if (!self) return res.json({ status: 'need_profile' });
 
     const other = await popWaiting(); // пытаемся забрать ждущего
@@ -818,11 +842,11 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
       const partnerId = other.userId;
       const dayKey = computeDayKey();
       const pairKey = makePairKey(userId, partnerId);
-           const already = await prisma.meeting.findUnique({
+           const already = await db.meeting.findUnique({
         where: { pairKey_dayKey: { pairKey, dayKey } },
       });
       if (already) return res.json({ status: 'already_today' });
-      await prisma.meeting.create({
+      await db.meeting.create({
         data: {
           userAId: userId,
           userBId: partnerId,
@@ -831,7 +855,7 @@ app.post('/api/shake', authMiddleware, async (req, res) => {
         },
       });
       // возвращаем данные партнёра (имя + username)
-      const partner = await prisma.profile.findUnique({ where: { userId: partnerId } });
+      const partner = await db.profile.findUnique({ where: { userId: partnerId } });
       const partnerContact = resolveProfileContact(partner);
 
       return res.json({
@@ -862,7 +886,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     const from = req.query.from ? new Date(req.query.from) : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
     const to   = req.query.to   ? new Date(req.query.to)   : (() => { const d = new Date(); d.setHours(23,59,59,999); return d; })();
 
-    const list = await prisma.meeting.findMany({
+    const list = await db.meeting.findMany({
       where: {
             metAt: { gte: from, lte: to },
         OR: [{ userAId: userId }, { userBId: userId }]
@@ -873,7 +897,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
     const items = [];
     for (const m of list) {
               const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
+      const p = await db.profile.findUnique({ where: { userId: otherId } });
             items.push({ user_id: otherId, profile: p, at: m.metAt });
     }
     res.json({ ok: true, items });
@@ -887,7 +911,7 @@ app.get('/api/shake/list', authMiddleware, async (req, res) => {
 app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
-    const list = await prisma.meeting.findMany({
+    const list = await db.meeting.findMany({
          where: { OR: [{ userAId: userId }, { userBId: userId }] },
       orderBy: { metAt: 'desc' },
       take: 20
@@ -895,7 +919,7 @@ app.get('/api/history', authMiddleware, async (req, res) => {
     const history = [];
     for (const m of list) {
       const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
+      const p = await db.profile.findUnique({ where: { userId: otherId } });
          history.push({
         withId: otherId,
         withUsername: p?.tgUsername || null,
@@ -924,6 +948,7 @@ async function bootstrap() {
     if (BOT_TOKEN) {
       ensureTelegramWebhook();
       ensureTelegramCommands();
+      ensureTelegramMenuButton();
     }
   });
 }
