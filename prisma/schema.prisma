@@ -3,19 +3,9 @@ generator client {
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
-// prisma/schema.prisma
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  // uncomment next line if you use Prisma <5.10
-  // directUrl = env("DATABASE_URL_UNPOOLED")
-}
-
-enum BottleDesign {
-  EFES
-  MILLER
-  KRUZHKA_SVEZHEGO
-  BELY_MEDVED
 }
 
 model Profile {
@@ -25,7 +15,13 @@ model Profile {
   age              Int
   mood             String
   bottleDesign     BottleDesign
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum BottleDesign {
+  EFES
+  MILLER
+  KRUZHKA_SVEZHEGO
+  BELY_MEDVED
 }

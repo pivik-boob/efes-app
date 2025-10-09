@@ -40,6 +40,58 @@ const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}`
 // ---------- Prisma ----------
 const DATABASE_URL = process.env.DATABASE_URL;
 
+const DESIGN_KEY_BY_ENUM = {
+  EFES: 'efes',
+  MILLER: 'miller',
+  KRUZHKA_SVEZHEGO: 'ruzka',
+  BELY_MEDVED: 'medved',
+};
+
+const DESIGN_ENUM_BY_KEY = {
+  efes: 'EFES',
+  miller: 'MILLER',
+  ruzka: 'KRUZHKA_SVEZHEGO',
+  medved: 'BELY_MEDVED',
+};
+
+const DESIGN_SYNONYMS = {
+  efes: 'efes',
+  classic: 'efes',
+  default: 'efes',
+  standard: 'efes',
+  miller: 'miller',
+  premium: 'miller',
+  ruzka: 'ruzka',
+  fest: 'ruzka',
+  kruzhka: 'ruzka',
+  kruzhka_svezhego: 'ruzka',
+  'kruzhka-svezhego': 'ruzka',
+  medved: 'medved',
+  ornament: 'medved',
+  bely_medved: 'medved',
+  'bely-medved': 'medved',
+  beliy_medved: 'medved',
+  'beliy-medved': 'medved',
+};
+
+function normalizeDesign(value, fallback = 'efes') {
+  if (typeof value !== 'string') return fallback;
+  const key = value.trim().toLowerCase();
+  if (!key) return fallback;
+  const mapped = DESIGN_SYNONYMS[key] || (DESIGN_ENUM_BY_KEY[key] ? key : null);
+  return mapped || fallback;
+}
+
+function designKeyToEnum(value, fallback = 'efes') {
+  const normalizedFallback = normalizeDesign(fallback || 'efes');
+  const normalized = normalizeDesign(value, normalizedFallback);
+  return DESIGN_ENUM_BY_KEY[normalized] || 'EFES';
+}
+
+function designEnumToKey(enumValue) {
+  if (typeof enumValue !== 'string') return 'efes';
+  return DESIGN_KEY_BY_ENUM[enumValue] || 'efes';
+}
 
 
 
@@ -53,13 +105,23 @@ const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
 
 
+
+
 function createFileStoreClient(reason = 'no DATABASE_URL') {
   const defaults = { profiles: {}, meetings: [] };
   let cache = null;
   let loadPromise = null;
   let writeChain = Promise.resolve();
-  const allowedProfileKeys = new Set(['userId', 'name', 'tgUsername', 'age', 'mood', 'design']);
-  
+  const allowedProfileKeys = new Set([
+    'userId',
+    'name',
+    'tgUsername',
+    'age',
+    'mood',
+    'design',
+    'createdAt',
+    'updatedAt',
+  ]);
   async function ensureLoaded() {
     if (cache) return cache;
     if (!loadPromise) {
@@ -124,11 +186,16 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
         const store = await ensureLoaded();
         const existing = store.profiles[where.userId];
         if (!existing) throw new Error('Profile not found');
+        const now = new Date().toISOString();
         const merged = {
           ...existing,
           ...data,
           userId: where.userId,
         };
+        merged.design = normalizeDesign(merged.design, existing?.design || 'efes');
+        merged.tgUsername = merged.tgUsername ?? null;
+        merged.createdAt = existing?.createdAt || now;
+        merged.updatedAt = now;
         const sanitized = Object.fromEntries(
           Object.entries(merged).filter(([key]) => allowedProfileKeys.has(key)),
         );
@@ -141,11 +208,16 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
       if (!userId) throw new Error('userId is required');
       return withWrite(async () => {
         const store = await ensureLoaded();
+        const now = new Date().toISOString();
         const merged = {
           ...data,
           userId,
         };
-         const sanitized = Object.fromEntries(
+        merged.design = normalizeDesign(merged.design, 'efes');
+        merged.tgUsername = merged.tgUsername ?? null;
+        merged.createdAt = now;
+        merged.updatedAt = now;
+        const sanitized = Object.fromEntries(
           Object.entries(merged).filter(([key]) => allowedProfileKeys.has(key)),
         );
         store.profiles[userId] = sanitized;
@@ -226,14 +298,99 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
   return { profile, meeting };
 }
 
+function normalizePrismaProfile(record) {
+  if (!record) return null;
+  const createdAt = record.createdAt instanceof Date ? record.createdAt.toISOString() : record.createdAt;
+  const updatedAt = record.updatedAt instanceof Date ? record.updatedAt.toISOString() : record.updatedAt;
+  return {
+    userId: record.id,
+    name: record.name,
+    age: record.age,
+    mood: record.mood,
+    tgUsername: record.telegramUsername || null,
+    design: designEnumToKey(record.bottleDesign),
+    createdAt: createdAt || null,
+    updatedAt: updatedAt || null,
+  };
+}
+
+function mapProfileDataForPrisma(data = {}, existingDesign = 'efes', forceDesign = false) {
+  const mapped = {};
+  if (data.name !== undefined) mapped.name = data.name;
+  if (data.age !== undefined) mapped.age = data.age;
+  if (data.mood !== undefined) mapped.mood = data.mood;
+  if (data.tgUsername !== undefined) mapped.telegramUsername = data.tgUsername || null;
+  if (data.design !== undefined) {
+    mapped.bottleDesign = designKeyToEnum(data.design, existingDesign);
+  } else if (forceDesign) {
+    mapped.bottleDesign = designKeyToEnum(existingDesign, existingDesign);
+  }
+  return mapped;
+}
+
+function createPrismaProfileClient(prismaClient) {
+  return {
+    async findUnique({ where }) {
+      const id = where?.userId || where?.id;
+      if (!id) return null;
+      const record = await prismaClient.profile.findUnique({ where: { id: String(id) } });
+      return normalizePrismaProfile(record);
+    },
+    async update({ where, data }) {
+      const id = where?.userId || where?.id;
+      if (!id) throw new Error('userId is required');
+      const existing = await prismaClient.profile.findUnique({ where: { id: String(id) } });
+      const record = await prismaClient.profile.update({
+        where: { id: String(id) },
+        data: mapProfileDataForPrisma(data, designEnumToKey(existing?.bottleDesign)),
+      });
+      return normalizePrismaProfile(record);
+    },
+    async create({ data }) {
+      const id = data?.userId || data?.id;
+      if (!id) throw new Error('userId is required');
+      const record = await prismaClient.profile.create({
+        data: {
+          id: String(id),
+          ...mapProfileDataForPrisma(data, 'efes', true),
+        },
+      });
+      return normalizePrismaProfile(record);
+    },
+    async upsert({ where, create, update }) {
+      const id = where?.userId || where?.id;
+      if (!id) throw new Error('userId is required');
+      const record = await prismaClient.profile.upsert({
+        where: { id: String(id) },
+        create: {
+          id: String(id),
+          ...mapProfileDataForPrisma(create, 'efes', true),
+        },
+        update: mapProfileDataForPrisma(update),
+      });
+      return normalizePrismaProfile(record);
+    },
+  };
+}
+
+let fallbackDb = null;
+function ensureFallbackDb(reason) {
+  if (!fallbackDb) {
+    fallbackDb = createFileStoreClient(reason);
+  }
+  return fallbackDb;
+}
+
 let prisma = null;
 let db = null;
 let dbInitPromise = Promise.resolve();
-if (process.env.DATABASE_URL) {
+if (DATABASE_URL) {
   prisma = new PrismaClient();
-  db = prisma;
-  dbInitPromise = ensurePostgresSchema(prisma)
+  db = { profile: createPrismaProfileClient(prisma), meeting: ensureFallbackDb('meeting_store').meeting };
+  dbInitPromise = prisma
+    .$connect()
     .then(() => {
+      db = { profile: createPrismaProfileClient(prisma), meeting: ensureFallbackDb('meeting_store').meeting };
       console.log('Prisma: CONNECTED to Postgres database.');
     })
     .catch(async err => {
@@ -242,67 +399,10 @@ if (process.env.DATABASE_URL) {
         await prisma.$disconnect();
       } catch (_) {}
       prisma = null;
-      db = createFileStoreClient('init_failed');
+      db = ensureFallbackDb('init_failed');
     });
 } else {
-   db = createFileStoreClient('no DATABASE_URL');
-}
-
-async function ensurePostgresSchema(prismaClient) {
-  const statements = [
-      `CREATE TABLE IF NOT EXISTS "app_user" (
-      "telegram_id" TEXT PRIMARY KEY,
-      "username" TEXT,
-      "name" TEXT NOT NULL DEFAULT 'Гость',
-      "age" INTEGER,
-      "mood" TEXT NOT NULL DEFAULT '🙂',
-      "design" TEXT NOT NULL DEFAULT 'classic'
-    )`,
-    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "username" TEXT`,
-    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "name" TEXT NOT NULL DEFAULT 'Гость'`,
-    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "age" INTEGER`,
-    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "mood" TEXT NOT NULL DEFAULT '🙂'`,
-    `ALTER TABLE "app_user" ADD COLUMN IF NOT EXISTS "design" TEXT NOT NULL DEFAULT 'classic'`,
-    `ALTER TABLE "app_user" ALTER COLUMN "name" SET DEFAULT 'Гость'`,
-    `ALTER TABLE "app_user" ALTER COLUMN "mood" SET DEFAULT '🙂'`,
-    `ALTER TABLE "app_user" ALTER COLUMN "design" SET DEFAULT 'classic'`,
-    `CREATE TABLE IF NOT EXISTS "Meeting" (
-      "id" TEXT PRIMARY KEY,
-      "userAId" TEXT NOT NULL,
-      "userBId" TEXT NOT NULL,
-      "pairKey" TEXT NOT NULL,
-      "dayKey" TEXT NOT NULL,
-      "metAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "userAId" TEXT`,
-    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "userBId" TEXT`,
-    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "pairKey" TEXT`,
-    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "dayKey" TEXT`,
-    `ALTER TABLE "Meeting" ADD COLUMN IF NOT EXISTS "metAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
-    `ALTER TABLE "Meeting" ALTER COLUMN "metAt" SET DEFAULT CURRENT_TIMESTAMP`,
-    `DO $$ BEGIN
-        ALTER TABLE "Meeting"
-        ADD CONSTRAINT "Meeting_userAId_fkey"
-        FOREIGN KEY ("userAId") REFERENCES "app_user"("telegram_id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-    END $$`,
-    `DO $$ BEGIN
-        ALTER TABLE "Meeting"
-        ADD CONSTRAINT "Meeting_userBId_fkey"
-        FOREIGN KEY ("userBId") REFERENCES "app_user"("telegram_id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-    END $$`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS "Meeting_pairKey_dayKey_key" ON "Meeting" ("pairKey", "dayKey")`,
-    `CREATE INDEX IF NOT EXISTS "Meeting_dayKey_idx" ON "Meeting" ("dayKey")`,
-    `CREATE INDEX IF NOT EXISTS "Meeting_userAId_metAt_idx" ON "Meeting" ("userAId", "metAt")`,
-    `CREATE INDEX IF NOT EXISTS "Meeting_userBId_metAt_idx" ON "Meeting" ("userBId", "metAt")`,
-  ];
-
-  for (const sql of statements) {
-    await prismaClient.$executeRawUnsafe(sql);
-  }
+   db = ensureFallbackDb('no DATABASE_URL');
 }
 
 // ---------- Helpers: sync Telegram username (no auto-create) ----------
@@ -315,6 +415,14 @@ function normalizeContact(value) {
   if (trimmed.startsWith('@')) return trimmed;
   if (USERNAME_HANDLE_REGEX.test(trimmed)) return `@${trimmed}`;
   return trimmed;
+}
+
+function normalizeContactForStorage(value) {
+  if (value === undefined) return undefined;
+  const normalized = normalizeContact(value);
+  if (!normalized) return null;
+  if (normalized.startsWith('@')) return normalized.slice(1);
+  return normalized;
 }
 
 async function syncTgUsername(userId, tgUser) {
@@ -345,13 +453,20 @@ function pickProfileFields(body = {}, tgUser = null) {
   const rawMood = typeof body.mood === 'string' ? body.mood.trim() : '';
   const age = coerceAge(body.age);
   const rawDesign = typeof body.design === 'string' ? body.design.trim() : '';
+  const design = rawDesign ? normalizeDesign(rawDesign) : undefined;
+  const contactProvided = Object.prototype.hasOwnProperty.call(body, 'contact');
+  const contact = contactProvided ? normalizeContactForStorage(body.contact) : undefined;
+  const tgUsername =
+    contactProvided
+      ? contact
+      : tgUser?.username || undefined;
 
   return {
     name: rawName,
     mood: rawMood,
     age,
-    tgUsername: tgUser?.username || null,
-    design: rawDesign,
+    tgUsername,
+    design,
   };
 }
 
@@ -371,13 +486,15 @@ async function upsertProfileFromWebApp(userId, body, tgUser) {
 
   const name = (fields.name || existing?.name || 'Гость').slice(0, 120);
   const mood = (((fields.mood ?? existing?.mood) || '')).slice(0, 160);
-  const designSource = fields.design || existing?.design || 'classic';
-  const design = String(designSource || 'classic').slice(0, 60);
+  const design = normalizeDesign(
+    fields.design !== undefined ? fields.design : existing?.design,
+    existing?.design || 'efes',
+  );
   const data = {
     name,
     age: fields.age ?? existing?.age ?? 21,
     mood,
-    tgUsername: fields.tgUsername,
+    tgUsername: fields.tgUsername ?? existing?.tgUsername ?? null,
     design,
   };
 
@@ -722,42 +839,54 @@ app.get('/api/profile/me', authMiddleware, async (req, res) => {
     res.status(500).json({ ok: false });
   }
 });
-// Update profile strictly via the Mini App
-app.post('/api/profile/update', authMiddleware, async (req, res) => {
+async function handleProfileSave(req, res) {
   try {
     const userId = req.userId;
-       const profile = await upsertProfileFromWebApp(userId, req.body || {}, req.tgUser);
+    const profile = await upsertProfileFromWebApp(userId, req.body || {}, req.tgUser);
     res.json({ ok: true, profile });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false });
   }
-});
+  }
+
+// Update profile strictly via the Mini App
+app.post('/api/profile/update', authMiddleware, handleProfileSave);
+
+// Dedicated endpoint for questionnaire submissions from the mini app
+app.post('/api/profile/questionnaire', authMiddleware, handleProfileSave);
 // Legacy endpoint kept to signal chat-based flows are disabled
 app.post('/api/profile/save', authMiddleware, (_req, res) => {
   res.status(410).json({ ok: false, error: 'profile_editing_available_only_in_mini_app' });
 });
 // Set design (совместимая точка)
-  app.post('/api/profile/design', authMiddleware, async (req, res) => {
-    try {
-      const userId = req.userId;
-      const rawDesign = typeof req.body?.design === 'string' ? req.body.design.trim() : '';
-      if (!rawDesign) return res.status(400).json({ ok: false, error: 'design required' });
-      const design = rawDesign.slice(0, 60);
-      const p = await db.profile.upsert({
-        where: { userId },
-        create: {
-          userId,
-          name: 'Гость',
-          age: 21,
-          mood: '',
-          design,
-        },
-        update: { design },
-      });
-      res.json({ ok: true, profile: decorateProfile(p) });
-    } catch (e) {
-      console.error(e);
+app.post('/api/profile/design', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const rawDesign = typeof req.body?.design === 'string' ? req.body.design.trim() : '';
+    const existing = await db.profile.findUnique({ where: { userId } });
+    const design = normalizeDesign(
+      rawDesign || existing?.design,
+      existing?.design || 'efes',
+    );
+    const profileDefaults = {
+      name: existing?.name || 'Гость',
+      age: existing?.age ?? 21,
+      mood: existing?.mood || '',
+      tgUsername: existing?.tgUsername ?? req.tgUser?.username ?? null,
+    };
+    const p = await db.profile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        ...profileDefaults,
+        design,
+      },
+      update: { design },
+    });
+    res.json({ ok: true, profile: decorateProfile(p) });
+  } catch (e) {
+    console.error(e);
     res.status(500).json({ ok: false });
   }
 });
@@ -884,15 +1013,15 @@ app.get('/api/history', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
     const list = await db.meeting.findMany({
-         where: { OR: [{ userAId: userId }, { userBId: userId }] },
+      where: { OR: [{ userAId: userId }, { userBId: userId }] },
       orderBy: { metAt: 'desc' },
-      take: 20
+      take: 20,
     });
     const history = [];
     for (const m of list) {
       const otherId = m.userAId === userId ? m.userBId : m.userAId;
       const p = await db.profile.findUnique({ where: { userId: otherId } });
-         history.push({
+      history.push({
         withId: otherId,
         withUsername: p?.tgUsername || null,
         withName: p?.name || otherId,

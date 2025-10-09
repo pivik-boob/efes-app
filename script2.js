@@ -108,8 +108,18 @@ const DESIGN_CLASSNAMES = Object.values(DESIGN_ASSETS)
 
 const DESIGN_ALIASES = {
   classic: "efes",
+  default: "efes",
+  standard: "efes",
   fest: "ruzka",
+  kruzhka: "ruzka",
+  kruzhka_svezhego: "ruzka",
+  "kruzhka-svezhego": "ruzka",
   ornament: "medved",
+  bely_medved: "medved",
+  "bely-medved": "medved",
+  beliy_medved: "medved",
+  "beliy-medved": "medved",
+  premium: "miller",
 };
 
 const THEMES = {
@@ -994,25 +1004,33 @@ function stopCountdown() {
 
 async function saveProfilePayload(payload) {
   try {
-    return await requestJSON("/api/profile/update", {
+    return await requestJSON("/api/profile/questionnaire", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
     });
   } catch (error) {
     try {
-      return await requestJSON("/api/profile/save", {
+      return await requestJSON("/api/profile/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: {
-          name: payload.name,
-          age21: payload.age ? payload.age >= 21 : undefined,
-          mood: payload.mood,
-          contact: payload.contact,
-        },
+        body: payload,
       });
     } catch (_) {
-      throw error;
+      try {
+        return await requestJSON("/api/profile/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: {
+            name: payload.name,
+            age21: payload.age ? payload.age >= 21 : undefined,
+            mood: payload.mood,
+            contact: payload.contact,
+          },
+        });
+      } catch (_) {
+        throw error;
+      }
     }
   }
 }
