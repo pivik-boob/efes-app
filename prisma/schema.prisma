@@ -2,35 +2,30 @@ generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
+
 // prisma/schema.prisma
 datasource db {
-  provider  = "postgresql"
-  url  	    = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
   // uncomment next line if you use Prisma <5.10
   // directUrl = env("DATABASE_URL_UNPOOLED")
 }
-model Profile {
-  userId     String  @id @map("telegram_id")
-  tgUsername String? @map("username")
-  name       String  @default("Гость")
-  age        Int?
-  mood       String? @default("🙂")
-  design     String? @default("classic")
+
+enum BottleDesign {
+  EFES
+  MILLER
+  KRUZHKA_SVEZHEGO
+  BELY_MEDVED
 }
 
-model Meeting {
-  id      String   @id @default(cuid())
-  userAId String
-  userBId String
-  dayKey  String
-  pairKey String
-  metAt   DateTime @default(now())
+model Profile {
+  id               String       @id @default(cuid())
+  telegramUsername String?      @unique
+  name             String
+  age              Int
+  mood             String
+  bottleDesign     BottleDesign
 
-  userA Profile @relation("MeetingsAsUserA", fields: [userAId], references: [userId])
-  userB Profile @relation("MeetingsAsUserB", fields: [userBId], references: [userId])
-  
-  @@unique([pairKey, dayKey])
-  @@index([dayKey])
-  @@index([userAId, metAt])
-  @@index([userBId, metAt])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
