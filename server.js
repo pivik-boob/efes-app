@@ -34,6 +34,7 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 10000;
 const PUBLIC_URL = process.env.PUBLIC_URL || ''; // e.g. https://efes-app.onrender.com
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const DEV_FALLBACK_USER_ID = process.env.DEV_FALLBACK_USER_ID || 'local-debug-user';
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 const TELEGRAM_WEBHOOK_PATH = `/telegram/webhook${TELEGRAM_WEBHOOK_SECRET ? `/${TELEGRAM_WEBHOOK_SECRET}` : ''}`;
 const TELEGRAM_API_BASE = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : '';
@@ -761,33 +762,62 @@ async function ensureTelegramMenuButton() {
 }
 
 // ---------- Telegram WebApp signature verify ----------
+function parseInitData(initDataRaw) {
+  const url = new URL('https://t.me/?' + (initDataRaw || ''));
+  const data = {};
+  for (const [k, v] of url.searchParams.entries()) data[k] = v;
+  return data;
+}
+
+function extractUserFromInitData(data) {
+  try {
+    const userStr = data.user || '';
+    const user = userStr ? JSON.parse(userStr) : null;
+    const userId = user?.id ? String(user.id) : null;
+    return { user, userId };
+  } catch (err) {
+    console.warn('Failed to parse Telegram user from init data:', err?.message || err);
+    return { user: null, userId: null };
+  }
+}
+
 function verifyInitData(initDataRaw) {
   try {
-    if (!initDataRaw || !BOT_TOKEN) return { ok: false };
-    // initDataRaw — это querystring из Telegram WebApp (tg.initData)
-    // Проверка: HMAC-SHA256 по ключу secretKey = sha256(BOT_TOKEN)
-    const url = new URL('https://t.me/?' + initDataRaw); // чтобы легко парсить
-    const data = {};
-    for (const [k, v] of url.searchParams.entries()) data[k] = v;
+    if (!initDataRaw) {
+      if (!BOT_TOKEN) {
+        return { ok: true, userId: DEV_FALLBACK_USER_ID, raw: {}, user: null, isFallback: true };
+      }
+      return { ok: false };
+    }
+
+    const data = parseInitData(initDataRaw);
+    const { user, userId } = extractUserFromInitData(data);
+
+    if (!BOT_TOKEN) {
+      return {
+        ok: Boolean(userId || DEV_FALLBACK_USER_ID),
+        userId: userId || DEV_FALLBACK_USER_ID,
+        raw: data,
+        user,
+        isFallback: true,
+      };
+    }
 
     const receivedHash = data.hash;
     if (!receivedHash) return { ok: false };
-    delete data.hash;
 
-    const keys = Object.keys(data).sort();
-    const checkString = keys.map(k => `${k}=${data[k]}`).join('\n');
+    const dataForHash = { ...data };
+    delete dataForHash.hash;
+
+    const keys = Object.keys(dataForHash).sort();
+    const checkString = keys.map(k => `${k}=${dataForHash[k]}`).join('\n');
 
     const secretKey = crypto.createHash('sha256').update(BOT_TOKEN).digest();
     const calcHash = crypto.createHmac('sha256', secretKey).update(checkString).digest('hex');
 
     if (calcHash !== receivedHash) return { ok: false };
 
-    // Достаём user.id
-    const userStr = data.user || '';
-    const user = userStr ? JSON.parse(userStr) : null;
-    const userId = user?.id ? String(user.id) : null;
-
-    return { ok: true, userId, raw: data, user };
+    return { ok: Boolean(userId), userId, raw: data, user };
   } catch (e) {
     console.error('verifyInitData error:', e);
     return { ok: false };
@@ -868,75 +898,75 @@ app.post('/api/profile/update', authMiddleware, handleProfileSave);
 app.post('/api/profile/questionnaire', authMiddleware, handleProfileSave);
 // Public endpoint for saving questionnaire submissions directly
 app.post('/api/profile/save', async (req, res) => {
-  if (!prisma) {
-    return res.status(503).json({ ok: false, error: 'database_unavailable' });
-  }
-
   try {
-    let { telegramUsername, name, age, mood, bottleDesign } = req.body || {};
+    const body = req.body || {};
 
-    // нормализация
-    if (typeof telegramUsername === 'string' && telegramUsername.startsWith('@')) {
-      telegramUsername = telegramUsername.slice(1);
-    }
-    if (typeof bottleDesign === 'string') {
-      bottleDesign = bottleDesign.trim().toUpperCase();
-      const ALLOWED = ['EFES', 'MILLER', 'KRUZHKA_SVEZHEGO', 'BELY_MEDVED'];
-      if (!ALLOWED.includes(bottleDesign)) {
-        return res
-          .status(400)
-          .json({ ok: false, error: `bottleDesign must be one of ${ALLOWED.join(', ')}` });
+    const rawName = typeof body.name === 'string' ? body.name.trim() : '';
+    const rawMood = typeof body.mood === 'string' ? body.mood.trim() : '';
+    const rawContact =
+      typeof body.contact === 'string'
+        ? body.contact.trim()
+        : typeof body.telegramUsername === 'string'
+          ? body.telegramUsername.trim()
+          : '';
+    const rawDesign =
+      typeof body.design === 'string'
+        ? body.design
+        : typeof body.bottleDesign === 'string'
+          ? designEnumToKey(String(body.bottleDesign).trim().toUpperCase())
+          : undefined;
+
+    let age = coerceAge(body.age);
+    if (age === null) {
+      const age21 = body.age21;
+      if (age21 === true || age21 === 'true' || age21 === 1 || age21 === '1') {
+        age = 21;
       }
     }
 
-    // валидация
-    const numAge = Number(age);
-    if (!telegramUsername) {
-      return res.status(400).json({ ok: false, error: 'telegramUsername required' });
-    }
-    if (!name) {
+    if (!rawName) {
       return res.status(400).json({ ok: false, error: 'name required' });
     }
-    if (!mood) {
+    if (!rawMood) {
       return res.status(400).json({ ok: false, error: 'mood required' });
     }
-    if (!bottleDesign) {
-      return res.status(400).json({ ok: false, error: 'bottleDesign required' });
+    if (!rawContact) {
+      return res.status(400).json({ ok: false, error: 'contact required' });
     }
-    if (!Number.isFinite(numAge)) {
-      return res.status(400).json({ ok: false, error: 'age must be a number' });
+    if (age === null || age === undefined) {
+      return res.status(400).json({ ok: false, error: 'age required' });
+    }
+    if (age < 21) {
+      return res.status(400).json({ ok: false, error: 'age must be at least 21' });
     }
 
-    // сохранение
-    const profile = await prisma.profile.upsert({
-      where: { telegramUsername },
-      create: { telegramUsername, name, age: numAge, mood, bottleDesign },
-      update: { name, age: numAge, mood, bottleDesign },
-      select: {
-        id: true,
-        telegramUsername: true,
-        name: true,
-        age: true,
-        mood: true,
-        bottleDesign: true,
-        createdAt: true,
-        updatedAt: true,
+    const normalizedContact = normalizeContactForStorage(rawContact);
+    if (!normalizedContact) {
+      return res.status(400).json({ ok: false, error: 'contact invalid' });
+    }
+
+    const derivedUserId =
+      typeof body.userId === 'string' && body.userId.trim()
+        ? body.userId.trim()
+        : `contact:${crypto.createHash('sha256').update(String(normalizedContact)).digest('hex')}`;
+
+    await dbInitPromise.catch(() => {});
+
+    const profile = await upsertProfileFromWebApp(
+      derivedUserId,
+      {
+        name: rawName,
+        age,
+        mood: rawMood,
+        contact: rawContact,
+        design: rawDesign,
       },
-    });
+      { username: normalizedContact },
+    );
 
-    
     return res.json({ ok: true, saved: true, profile });
   } catch (e) {
     console.error('POST /api/profile/save error:', e);
-    // Разобранные частые ошибки:
-    if (e.code === 'P2002') {
-      return res
-        .status(409)
-        .json({ ok: false, error: 'username already exists (unique conflict)' });
-    }
-    if (e.code === 'P2009' || e.code === 'P2025') {
-      return res.status(400).json({ ok: false, error: 'invalid data' });
-    }
     return res.status(500).json({ ok: false, error: 'internal' });
   }
 });
