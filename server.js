@@ -818,7 +818,7 @@ function verifyInitData(initDataRaw) {
     const keys = Object.keys(dataForHash).sort();
     const checkString = keys.map(k => `${k}=${dataForHash[k]}`).join('\n');
 
-    const secretKey = crypto.createHash('sha256').update(BOT_TOKEN).digest();
+    const secretKey = crypto.createHmac('sha256', "WebAppData").update(BOT_TOKEN).digest();
     const calcHash = crypto.createHmac('sha256', secretKey).update(checkString).digest('hex');
 
     if (calcHash !== receivedHash) return { ok: false };
