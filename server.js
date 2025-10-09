@@ -385,21 +385,32 @@ function ensureFallbackDb(reason) {
 let prisma = null;
 let db = null;
 let dbInitPromise = Promise.resolve();
+
 if (DATABASE_URL) {
   prisma = new PrismaClient();
-  db = { profile: createPrismaProfileClient(prisma), meeting: ensureFallbackDb('meeting_store').meeting };
+  // Изначально используем Prisma для всего
+  db = {
+    profile: createPrismaProfileClient(prisma),
+    meeting: prisma.meeting, // <-- ИСПОЛЬЗУЕМ PRISMA
+  };
+
   dbInitPromise = prisma
     .$connect()
     .then(() => {
-      db = { profile: createPrismaProfileClient(prisma), meeting: ensureFallbackDb('meeting_store').meeting };
+      // После успешного подключения подтверждаем, что используем Prisma
+      db = {
+        profile: createPrismaProfileClient(prisma),
+        meeting: prisma.meeting, // <-- ИСПОЛЬЗUЕМ PRISMA
+      };
       console.log('Prisma: CONNECTED to Postgres database.');
     })
-    .catch(async err => {
+    .catch(async (err) => {
       console.error('Prisma init failed, falling back to JSON store:', err?.message || err);
       try {
         await prisma.$disconnect();
       } catch (_) {}
       prisma = null;
+      // Если Prisma не работает, используем временный файл для ВСЕГО
       db = ensureFallbackDb('init_failed');
     });
 } else {

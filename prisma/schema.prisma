@@ -25,3 +25,13 @@ enum BottleDesign {
   KRUZHKA_SVEZHEGO
   BELY_MEDVED
 }
+model Meeting {
+  id      String   @id @default(cuid())
+  userAId String
+  userBId String
+  pairKey String
+  dayKey  String
+  metAt   DateTime @default(now())
+
+  @@unique([pairKey, dayKey])
+}
