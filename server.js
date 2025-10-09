@@ -903,7 +903,26 @@ app.post('/api/profile/update', authMiddleware, handleProfileSave);
 // Dedicated endpoint for questionnaire submissions from the mini app
 app.post('/api/profile/questionnaire', authMiddleware, handleProfileSave);
 app.post('/api/profile/save', authMiddleware, handleProfileSave);
-app.post('/api/profile/design', authMiddleware, async (req, res) => {
+function authMiddleware(req, res, next) {
+  const initDataRaw = req.headers['authorization'] || req.body?.tgInitData || '';
+
+  // ЭТОТ БЛОК НУЖНО ДОБАВИТЬ
+  console.log('--- ПОЛУЧЕННЫЕ initData ---');
+  console.log(initDataRaw);
+  console.log('---------------------------');
+
+  const v = verifyInitData(initDataRaw);
+
+  // И ЭТОТ БЛОК НУЖНО ДОБАВИТЬ
+  console.log('--- РЕЗУЛЬТАТ ВЕРИФИКАЦИИ ---');
+  console.log(v);
+  console.log('-----------------------------');
+
+  if (!v.ok || !v.userId) return res.status(401).json({ ok: false, error: 'unauthorized' });
+  req.userId = v.userId;
+  req.tgUser = v.user || null;
+  next();
+}
   try {
     const userId = req.userId;
     const rawDesign = typeof req.body?.design === 'string' ? req.body.design.trim() : '';
@@ -932,7 +951,6 @@ app.post('/api/profile/design', authMiddleware, async (req, res) => {
     console.error(e);
     res.status(500).json({ ok: false });
   }
-});
 
 // ---------- MATCH UTILS ----------
 const MATCH_WINDOW_MS = 12000;
