@@ -570,6 +570,15 @@ function buildMiniAppButton() {
   };
 }
 
+function buildStartMenuKeyboard() {
+  return {
+    keyboard: [[{ text: '/start' }]],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: 'Нажми /start, чтобы открыть меню',
+  };
+}
+
 function buildMiniAppLink() {
   if (!PUBLIC_URL) return '';
   return `${PUBLIC_URL.replace(/\/$/, '')}/`;
@@ -601,10 +610,17 @@ async function sendGreetingAndMiniApp(message) {
 
   const greetingText = formatGreeting(message);
 
-  await callTelegram('sendMessage', {
+  const greetingMessage = {
     chat_id: chatId,
     text: greetingText,
-  });
+ };
+
+  const startMenu = buildStartMenuKeyboard();
+  if (startMenu) {
+    greetingMessage.reply_markup = startMenu;
+  }
+
+  await callTelegram('sendMessage', greetingMessage);
 
   const miniAppButton = buildMiniAppButton();
   const miniAppMessage = {
@@ -723,14 +739,9 @@ async function ensureTelegramCommands() {
 async function ensureTelegramMenuButton() {
   if (!TELEGRAM_API_BASE) return;
 
-  const miniAppUrl = buildMiniAppLink();
-  if (!miniAppUrl) return;
-
   const payload = {
     menu_button: {
-      type: 'web_app',
-      text: 'Старт',
-      web_app: { url: miniAppUrl },
+      type: 'commands',
     },
   };
 
@@ -848,18 +859,87 @@ async function handleProfileSave(req, res) {
     console.error(e);
     res.status(500).json({ ok: false });
   }
-  }
+}
 
 // Update profile strictly via the Mini App
 app.post('/api/profile/update', authMiddleware, handleProfileSave);
 
 // Dedicated endpoint for questionnaire submissions from the mini app
 app.post('/api/profile/questionnaire', authMiddleware, handleProfileSave);
-// Legacy endpoint kept to signal chat-based flows are disabled
-app.post('/api/profile/save', authMiddleware, (_req, res) => {
-  res.status(410).json({ ok: false, error: 'profile_editing_available_only_in_mini_app' });
+// Public endpoint for saving questionnaire submissions directly
+app.post('/api/profile/save', async (req, res) => {
+  if (!prisma) {
+    return res.status(503).json({ ok: false, error: 'database_unavailable' });
+  }
+
+  try {
+    let { telegramUsername, name, age, mood, bottleDesign } = req.body || {};
+
+    // нормализация
+    if (typeof telegramUsername === 'string' && telegramUsername.startsWith('@')) {
+      telegramUsername = telegramUsername.slice(1);
+    }
+    if (typeof bottleDesign === 'string') {
+      bottleDesign = bottleDesign.trim().toUpperCase();
+      const ALLOWED = ['EFES', 'MILLER', 'KRUZHKA_SVEZHEGO', 'BELY_MEDVED'];
+      if (!ALLOWED.includes(bottleDesign)) {
+        return res
+          .status(400)
+          .json({ ok: false, error: `bottleDesign must be one of ${ALLOWED.join(', ')}` });
+      }
+    }
+
+    // валидация
+    const numAge = Number(age);
+    if (!telegramUsername) {
+      return res.status(400).json({ ok: false, error: 'telegramUsername required' });
+    }
+    if (!name) {
+      return res.status(400).json({ ok: false, error: 'name required' });
+    }
+    if (!mood) {
+      return res.status(400).json({ ok: false, error: 'mood required' });
+    }
+    if (!bottleDesign) {
+      return res.status(400).json({ ok: false, error: 'bottleDesign required' });
+    }
+    if (!Number.isFinite(numAge)) {
+      return res.status(400).json({ ok: false, error: 'age must be a number' });
+    }
+
+    // сохранение
+    const profile = await prisma.profile.upsert({
+      where: { telegramUsername },
+      create: { telegramUsername, name, age: numAge, mood, bottleDesign },
+      update: { name, age: numAge, mood, bottleDesign },
+      select: {
+        id: true,
+        telegramUsername: true,
+        name: true,
+        age: true,
+        mood: true,
+        bottleDesign: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    
+    return res.json({ ok: true, saved: true, profile });
+  } catch (e) {
+    console.error('POST /api/profile/save error:', e);
+    // Разобранные частые ошибки:
+    if (e.code === 'P2002') {
+      return res
+        .status(409)
+        .json({ ok: false, error: 'username already exists (unique conflict)' });
+    }
+    if (e.code === 'P2009' || e.code === 'P2025') {
+      return res.status(400).json({ ok: false, error: 'invalid data' });
+    }
+    return res.status(500).json({ ok: false, error: 'internal' });
+  }
 });
-// Set design (совместимая точка)
 app.post('/api/profile/design', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
