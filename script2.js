@@ -1036,23 +1036,11 @@ async function saveProfilePayload(payload) {
 }
 
 async function saveDesignPayload(design) {
-  try {
-    return await requestJSON("/api/profile/design", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { design },
-    });
-  } catch (error) {
-    try {
-      return await requestJSON("/api/save_design", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: { design },
-      });
-    } catch (_) {
-      throw error;
-    }
-  }
+  return await requestJSON("/api/profile/design", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { design },
+  });
 }
 
 function animateBottle() {

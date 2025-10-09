@@ -403,7 +403,13 @@ if (DATABASE_URL) {
       db = ensureFallbackDb('init_failed');
     });
 } else {
-   db = ensureFallbackDb('no DATABASE_URL');
+  const runningOnRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+  if (runningOnRender) {
+    console.error('DATABASE_URL is required in the Render environment.');
+    console.error('Please configure the "DATABASE_URL" environment variable to point to Postgres.');
+    process.exit(1);
+  }
+  db = ensureFallbackDb('no DATABASE_URL');
 }
 
 // ---------- Helpers: sync Telegram username (no auto-create) ----------
@@ -896,80 +902,7 @@ app.post('/api/profile/update', authMiddleware, handleProfileSave);
 
 // Dedicated endpoint for questionnaire submissions from the mini app
 app.post('/api/profile/questionnaire', authMiddleware, handleProfileSave);
-// Public endpoint for saving questionnaire submissions directly
-app.post('/api/profile/save', async (req, res) => {
-  try {
-    const body = req.body || {};
-
-    const rawName = typeof body.name === 'string' ? body.name.trim() : '';
-    const rawMood = typeof body.mood === 'string' ? body.mood.trim() : '';
-    const rawContact =
-      typeof body.contact === 'string'
-        ? body.contact.trim()
-        : typeof body.telegramUsername === 'string'
-          ? body.telegramUsername.trim()
-          : '';
-    const rawDesign =
-      typeof body.design === 'string'
-        ? body.design
-        : typeof body.bottleDesign === 'string'
-          ? designEnumToKey(String(body.bottleDesign).trim().toUpperCase())
-          : undefined;
-
-    let age = coerceAge(body.age);
-    if (age === null) {
-      const age21 = body.age21;
-      if (age21 === true || age21 === 'true' || age21 === 1 || age21 === '1') {
-        age = 21;
-      }
-    }
-
-    if (!rawName) {
-      return res.status(400).json({ ok: false, error: 'name required' });
-    }
-    if (!rawMood) {
-      return res.status(400).json({ ok: false, error: 'mood required' });
-    }
-    if (!rawContact) {
-      return res.status(400).json({ ok: false, error: 'contact required' });
-    }
-    if (age === null || age === undefined) {
-      return res.status(400).json({ ok: false, error: 'age required' });
-    }
-    if (age < 21) {
-      return res.status(400).json({ ok: false, error: 'age must be at least 21' });
-    }
-
-    const normalizedContact = normalizeContactForStorage(rawContact);
-    if (!normalizedContact) {
-      return res.status(400).json({ ok: false, error: 'contact invalid' });
-    }
-
-    const derivedUserId =
-      typeof body.userId === 'string' && body.userId.trim()
-        ? body.userId.trim()
-        : `contact:${crypto.createHash('sha256').update(String(normalizedContact)).digest('hex')}`;
-
-    await dbInitPromise.catch(() => {});
-
-    const profile = await upsertProfileFromWebApp(
-      derivedUserId,
-      {
-        name: rawName,
-        age,
-        mood: rawMood,
-        contact: rawContact,
-        design: rawDesign,
-      },
-      { username: normalizedContact },
-    );
-
-    return res.json({ ok: true, saved: true, profile });
-  } catch (e) {
-    console.error('POST /api/profile/save error:', e);
-    return res.status(500).json({ ok: false, error: 'internal' });
-  }
-});
+app.post('/api/profile/save', authMiddleware, handleProfileSave);
 app.post('/api/profile/design', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
