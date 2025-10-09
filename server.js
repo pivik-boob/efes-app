@@ -488,35 +488,59 @@ function decorateProfile(profile) {
 }
 
 async function upsertProfileFromWebApp(userId, body, tgUser) {
-  const existing = await db.profile.findUnique({ where: { userId } });
   const fields = pickProfileFields(body, tgUser);
-
-  const name = (fields.name || existing?.name || 'Гость').slice(0, 120);
-  const mood = (((fields.mood ?? existing?.mood) || '')).slice(0, 160);
-  const design = normalizeDesign(
-    fields.design !== undefined ? fields.design : existing?.design,
-    existing?.design || 'efes',
-  );
-  const data = {
-    name,
-    age: fields.age ?? existing?.age ?? 21,
-    mood,
-    tgUsername: fields.tgUsername ?? existing?.tgUsername ?? null,
-    design,
+  const profileData = {
+    name: (fields.name || 'Гость').slice(0, 120),
+    age: fields.age ?? 21,
+    mood: (fields.mood || '').slice(0, 160),
+    tgUsername: fields.tgUsername ?? tgUser?.username ?? null,
+    design: normalizeDesign(fields.design, 'efes'),
   };
 
-  if (existing) {
-    const record = await db.profile.update({ where: { userId }, data });
-    return decorateProfile(record);
+  // Шаг 1: Ищем пользователя по его ID
+  let profile = await prisma.profile.findUnique({ where: { id: userId } });
+
+  if (profile) {
+    // Пользователь найден по ID — просто обновляем его данные
+    profile = await prisma.profile.update({
+      where: { id: userId },
+      data: mapProfileDataForPrisma(profileData, designEnumToKey(profile.bottleDesign)),
+    });
+  } else if (profileData.tgUsername) {
+    // Шаг 2: Если по ID не нашли, ищем по username
+    const profileByUsername = await prisma.profile.findUnique({
+      where: { telegramUsername: profileData.tgUsername },
+    });
+
+    if (profileByUsername) {
+      // Пользователь найден по username! Обновляем его запись, включая новый ID
+      profile = await prisma.profile.update({
+        where: { telegramUsername: profileData.tgUsername },
+        data: {
+          id: userId, // <-- Привязываем старый профиль к новому ID
+          ...mapProfileDataForPrisma(profileData, designEnumToKey(profileByUsername.bottleDesign)),
+        },
+      });
+    } else {
+      // Шаг 3: Если не нашли ни по ID, ни по username — это точно новый пользователь
+      profile = await prisma.profile.create({
+        data: {
+          id: userId,
+          ...mapProfileDataForPrisma(profileData, 'efes', true),
+        },
+      });
+    }
+  } else {
+    // Шаг 3 (альтернативный): Если нет даже username, создаём нового пользователя
+    profile = await prisma.profile.create({
+      data: {
+        id: userId,
+        ...mapProfileDataForPrisma(profileData, 'efes', true),
+      },
+    });
   }
 
-  const created = await db.profile.create({
-    data: {
-      ...data,
-      userId,
-    },
-  });
-  return decorateProfile(created);
+  return decorateProfile(normalizePrismaProfile(profile));
 }
 
 function computeDayKey(date = new Date()) {
