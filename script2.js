@@ -7,6 +7,99 @@ const fallbackApiBase = window.location && window.location.origin
 const API_BASE = (rawApiBase || fallbackApiBase || "").replace(/\/$/, "");
 const BOT_USERNAME = window.__BOT_USERNAME__ || "";
 
+const DEFAULT_LANGUAGE = 'ru';
+const SUPPORTED_LANGUAGES = ['ru', 'en'];
+
+const i18nState = {
+  currentLanguage: DEFAULT_LANGUAGE,
+  translations: {},
+  fallbackTranslations: {},
+  cache: {},
+};
+
+function normalizeLanguage(code) {
+  if (typeof code !== "string") return DEFAULT_LANGUAGE;
+  const trimmed = code.trim().toLowerCase();
+  return SUPPORTED_LANGUAGES.includes(trimmed) ? trimmed : DEFAULT_LANGUAGE;
+}
+
+async function fetchTranslations(language) {
+  const lang = normalizeLanguage(language);
+  const response = await fetch(`/i18n/${lang}.json`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Failed to load translations for ${lang}`);
+  }
+  return response.json();
+}
+
+async function loadTranslations(language) {
+  const lang = normalizeLanguage(language);
+  if (!i18nState.cache[lang]) {
+    i18nState.cache[lang] = await fetchTranslations(lang);
+  }
+  return i18nState.cache[lang];
+}
+
+function getTranslationValue(source, key) {
+  if (!source) return undefined;
+  const parts = key.split('.');
+  let value = source;
+  for (const part of parts) {
+    if (value && Object.prototype.hasOwnProperty.call(value, part)) {
+      value = value[part];
+    } else {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+function t(key, params = {}) {
+  if (!key) return '';
+  const primary = getTranslationValue(i18nState.translations, key);
+  const fallback = primary === undefined
+    ? getTranslationValue(i18nState.fallbackTranslations, key)
+    : primary;
+  const raw = fallback !== undefined ? fallback : key;
+  if (typeof raw !== 'string') {
+    return typeof raw === 'number' ? String(raw) : key;
+  }
+  return raw.replace(/{{\s*(\w+)\s*}}/g, (_match, token) => {
+    const value = params[token];
+    return value === undefined || value === null ? '' : String(value);
+  });
+}
+
+function applyTranslations(root = document) {
+  const scope = root || document;
+  scope.querySelectorAll('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
+  });
+  scope.querySelectorAll('[data-i18n-html]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-html');
+    el.innerHTML = t(key);
+  });
+  const attributeMappings = [
+    ['data-i18n-placeholder', 'placeholder'],
+    ['data-i18n-title', 'title'],
+    ['data-i18n-aria-label', 'aria-label'],
+    ['data-i18n-aria-description', 'aria-description'],
+    ['data-i18n-value', 'value'],
+  ];
+  attributeMappings.forEach(([dataAttr, targetAttr]) => {
+    scope.querySelectorAll(`[${dataAttr}]`).forEach((el) => {
+      const key = el.getAttribute(dataAttr);
+      const value = t(key);
+      if (targetAttr === 'value') {
+        el.value = value;
+      } else if (value !== undefined) {
+        el.setAttribute(targetAttr, value);
+      }
+    });
+  });
+}
+
 const els = {
   card: document.querySelector(".card"),
   username: document.getElementById("username"),
@@ -60,11 +153,15 @@ const state = {
   lastHistoryTimestamp: 0,
   selectedDesign: "efes",
   profile: undefined,
+  language: DEFAULT_LANGUAGE,
   moodOptions: [],
   moodCardRefs: [],
   moodIndex: 0,
   customMoodValue: "",
   autoContact: null,
+  partnerData: null,
+  historyCache: [],
+  statusState: null,
 };
 
 const moodGestureState = {
@@ -76,25 +173,25 @@ const moodGestureState = {
 
 const DESIGN_ASSETS = {
   efes: {
-    label: "Efes",
+    labelKey: "design.efes",
     theme: "efes",
     visual: "bottle",
     className: "bottle--efes",
   },
     ruzka: {
-    label: "Кружка свежего",
+    labelKey: "design.ruzka",
     theme: "ruzka",
-       visual: "bottle",
+    visual: "bottle",
     className: "bottle--ruzka",
   },
   medved: {
-    label: "Белый медведь",
+    labelKey: "design.medved",
     theme: "medved",
     visual: "bottle",
     className: "bottle--medved",
   },
   miller: {
-    label: "Miller",
+    labelKey: "design.miller",
     theme: "miller",
     visual: "bottle",
     className: "bottle--miller",
@@ -152,42 +249,50 @@ const THEME_BACKGROUNDS = {
   ],
 };
 
-const MOOD_PRESETS = [
+const MOOD_PRESETS_CONFIG = [
   {
-    value: "Весёлое",
-    label: "Весёлое",
+    key: "joyful",
     emoji: "🥳",
-    description: "Готов(а) чокаться со всеми подряд",
+    valueKey: "mood.joyful.value",
+    labelKey: "mood.joyful.label",
+    descriptionKey: "mood.joyful.description",
   },
   {
-    value: "Чилл",
-    label: "Чилл",
+    valueKey: "mood.joyful.value",
+    labelKey: "mood.joyful.label",
+    descriptionKey: "mood.joyful.description",
     emoji: "😌",
-    description: "Спокойно отдыхаю и ловлю вайб",
+    valueKey: "mood.chill.value",
+    labelKey: "mood.chill.label",
+    descriptionKey: "mood.chill.description",
   },
   {
-    value: "Энергичное",
-    label: "Энергичное",
+    key: "energetic",
     emoji: "⚡️",
-    description: "В поиске драйва и шумных компаний",
+    valueKey: "mood.energetic.value",
+    labelKey: "mood.energetic.label",
+    descriptionKey: "mood.energetic.description",
   },
   {
-    value: "Флирт",
-    label: "Флирт",
+    key: "dance",
     emoji: "😉",
-    description: "Настроение ловить искры и улыбки",
-  },
+    valueKey: "mood.flirt.value",
+    labelKey: "mood.flirt.label",
+    descriptionKey: "mood.flirt.description",
+    },
   {
-    value: "Танцевальное",
-    label: "Танцевальное",
+    key: "dance",
     emoji: "💃",
-    description: "Готов(а) выйти на танцпол прямо сейчас",
+    valueKey: "mood.dance.value",
+    labelKey: "mood.dance.label",
+    descriptionKey: "mood.dance.description",
   },
   {
-    value: "",
-    label: "Своё настроение",
+    key: "custom",
     emoji: "✨",
-    description: "Придумай свой вайб и поделись им",
+    valueKey: "mood.custom.value",
+    labelKey: "mood.custom.label",
+    descriptionKey: "mood.custom.description",
     custom: true,
   },
 ];
@@ -263,16 +368,44 @@ function resolveBackground(theme) {
   }).finally(() => {
     delete backgroundPromises[key];
   });
-
   return backgroundPromises[key];
 }
 function getResolvedBackground(theme) {
   const key = THEMES[theme] ? theme : "efes";
   return backgroundCache[key] || getFallbackBackground(key);
 }
-
 function getCustomMoodIndex() {
   return state.moodOptions.findIndex(option => option.custom);
+}
+
+function buildMoodOptions() {
+  return MOOD_PRESETS_CONFIG.map((config) => ({
+    ...config,
+    value: config.custom ? "" : t(config.valueKey || config.labelKey),
+    label: t(config.labelKey),
+    description: config.descriptionKey ? t(config.descriptionKey) : "",
+  }));
+}
+
+function updateActiveMoodText(displayValue) {
+  if (!els.moodActiveText) return;
+  if (!displayValue) {
+    els.moodActiveText.textContent = "";
+  } else {
+    els.moodActiveText.textContent = t("mood.current", { value: displayValue });
+  }
+}
+
+function rebuildMoodOptions({ preserveValue = true } = {}) {
+  const currentValue = preserveValue && els.moodInput ? (els.moodInput.value || "") : "";
+  state.moodOptions = buildMoodOptions();
+  renderMoodOptions();
+  updateCustomCard(state.customMoodValue);
+  if (preserveValue && currentValue) {
+    applyProfileMood(currentValue);
+  } else {
+    setMoodIndex(0);
+  }
 }
 
 function updateCustomCard(value) {
@@ -437,9 +570,7 @@ function setMoodIndex(index, options = {}) {
     displayValue = option.value;
   }
 
-  if (els.moodActiveText) {
-    els.moodActiveText.textContent = displayValue ? `Сейчас: ${displayValue}` : "";
-  }
+  updateActiveMoodText(displayValue);
 }
 
 function handleMoodNav(direction) {
@@ -454,9 +585,7 @@ function handleMoodCustomInput() {
     els.moodInput.value = value;
     const option = state.moodOptions[state.moodIndex];
     const displayValue = value || option.label;
-    if (els.moodActiveText) {
-      els.moodActiveText.textContent = displayValue ? `Сейчас: ${displayValue}` : "";
-    }
+    updateActiveMoodText(displayValue);
   }
 }
 
@@ -537,11 +666,8 @@ function initMoodGestures() {
 
 function initMoodCarousel() {
   if (!els.moodTrack) return;
-  state.moodOptions = [...MOOD_PRESETS];
   state.customMoodValue = (els.moodCustomInput?.value || "").trim();
-  renderMoodOptions();
-  updateCustomCard(state.customMoodValue);
-  setMoodIndex(0);
+  rebuildMoodOptions({ preserveValue: false });
   if (typeof requestAnimationFrame === "function") {
     requestAnimationFrame(() => updateMoodTransform());
 } else {
@@ -624,7 +750,7 @@ function applyContactAutofill(profileOverride = null) {
       contactField.classList.add("field--contact-locked");
     }
     if (els.contactNote) {
-      els.contactNote.textContent = "Мы используем твой Telegram @username — его увидит собеседник после чока.";
+      els.contactNote.textContent = t("contact.autofillNote");
       els.contactNote.hidden = false;
     }
   } else {
@@ -641,7 +767,7 @@ function applyContactAutofill(profileOverride = null) {
       contactField.classList.remove("field--contact-locked");
     }
     if (els.contactNote) {
-      els.contactNote.textContent = "Укажи, как с тобой связаться (например, телефон или @username).";
+      els.contactNote.textContent = t("contact.manualNote");
       els.contactNote.hidden = false;
     }
   }
@@ -649,9 +775,18 @@ function applyContactAutofill(profileOverride = null) {
 
 function updateUsernameDisplay(profile) {
   if (!els.username) return;
+  const setDisplay = (value, translationKey = null) => {
+    if (translationKey) {
+      els.username.setAttribute('data-i18n', translationKey);
+      els.username.textContent = t(translationKey);
+    } else {
+      els.username.removeAttribute('data-i18n');
+      els.username.textContent = value || "";
+    }
+  };
   const tgUser = tg?.initDataUnsafe?.user;
   if (tgUser?.username) {
-    els.username.textContent = formatUsername(tgUser.username);
+    setDisplay(formatUsername(tgUser.username));
     return;
   }
   const contactHandle = profile?.contact && profile.contact.includes("@")
@@ -669,29 +804,29 @@ function updateUsernameDisplay(profile) {
       || contactHandle
   );
   if (profileUsername) {
-    els.username.textContent = profileUsername;
+    setDisplay(profileUsername);
     return;
   }
   if (tgUser) {
     const fullName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ").trim();
     if (fullName) {
-      els.username.textContent = fullName;
+      setDisplay(fullName);
       return;
     }
       }
   if (profile?.name) {
-    els.username.textContent = profile.name;
+    setDisplay(profile.name);
     return;
   }
-  els.username.textContent = "Гость";
+  setDisplay("", "profile.guestName");
 }
 
 const LEVELS = [
-  { level: 1, title: "Новичок", xp: 0 },
-  { level: 2, title: "Чок-мастер", xp: 120 },
-  { level: 3, title: "Пенный герой", xp: 260 },
-  { level: 4, title: "Король бара", xp: 420 },
-  { level: 5, title: "Легенда клуба", xp: 600 },
+  { level: 1, titleKey: "level.1", xp: 0 },
+  { level: 2, titleKey: "level.2", xp: 120 },
+  { level: 3, titleKey: "level.3", xp: 260 },
+  { level: 4, titleKey: "level.4", xp: 420 },
+  { level: 5, titleKey: "level.5", xp: 600 },
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -776,8 +911,8 @@ function resolveLevel(xp) {
     : Math.min(1, Math.max(0, (xp - current.xp) / span));
 
   return {
-    current,
-    next,
+    current: { ...current, title: t(current.titleKey) },
+    next: { ...next, title: t(next.titleKey) },
     progress,
   };
 }
@@ -786,21 +921,21 @@ function renderQuests(stats) {
   const quests = [
     {
       id: "daily",
-      label: "Чокнись сегодня",
+      label: t("quests.daily"),
       progress: Math.min(1, stats.todayCount / 1),
       current: stats.todayCount,
       target: 1,
     },
     {
       id: "friends",
-       label: "Познакомься с 5 друзьями",
+       label: t("quests.friends"),
        progress: Math.min(1, stats.unique / 5),
        current: stats.unique,
         target: 5,
     },
     {
       id: "streak",
-      label: "Держи серию 3 дня",
+      label: t("quests.streak"),
       progress: Math.min(1, stats.streak / 3),
      
            current: stats.streak,
@@ -834,6 +969,7 @@ function renderQuests(stats) {
   }
 }
 function updateGamification(history = []) {
+  state.historyCache = history;
   const stats = computeStats(history);
   const level = resolveLevel(stats.xp);
 
@@ -868,6 +1004,60 @@ function setStatus(text) {
     els.status.textContent = text || "";
   }
 }
+
+function setStatusKey(key, params = {}) {
+  state.statusState = { key, params };
+  setStatus(t(key, params));
+}
+
+function refreshStatus() {
+  if (state.statusState) {
+    setStatus(t(state.statusState.key, state.statusState.params));
+  }
+}
+
+async function setLanguage(language) {
+  const lang = normalizeLanguage(language);
+  try {
+    const translations = await loadTranslations(lang);
+    i18nState.translations = translations;
+    if (lang === DEFAULT_LANGUAGE || !Object.keys(i18nState.fallbackTranslations).length) {
+      i18nState.fallbackTranslations = translations;
+    }
+    i18nState.currentLanguage = lang;
+    state.language = lang;
+    if (document?.documentElement) {
+      document.documentElement.setAttribute('lang', lang);
+    }
+    applyTranslations();
+    if (document) {
+      document.title = t('app.title');
+    }
+    rebuildMoodOptions({ preserveValue: true });
+    applyDesign(state.selectedDesign);
+    updateUsernameDisplay(state.profile);
+    applyContactAutofill(state.profile);
+    if (state.partnerData) {
+      renderPartner(state.partnerData);
+    } else {
+      setPartner("");
+    }
+    refreshStatus();
+    updateGamification(state.historyCache || []);
+  } catch (error) {
+    console.error("setLanguage", error);
+  }
+}
+
+async function ensureLanguage(language) {
+  const lang = normalizeLanguage(language);
+  if (lang === i18nState.currentLanguage && Object.keys(i18nState.translations).length) {
+    applyTranslations();
+    refreshStatus();
+    return;
+  }
+  await setLanguage(lang);
+}
 function setPartner(content) {
   if (!els.partner) return;
   if (content instanceof Node) {
@@ -875,6 +1065,7 @@ function setPartner(content) {
     els.partner.appendChild(content);
     return;
   }
+  state.partnerData = null;
   els.partner.textContent = content || "";
 }
 const DEFAULT_DROP_SHADOW = "drop-shadow(0 12px 18px rgba(0,0,0,0.45))";
@@ -896,7 +1087,8 @@ function applyDesign(design) {
     } else {
       els.bottle.classList.add("visual--bottle");
     }
-        els.bottle.setAttribute("aria-label", `Пиксельная бутылочка ${cfg.label}`.trim());
+        const designLabel = cfg.labelKey ? t(cfg.labelKey) : "";
+    els.bottle.setAttribute("aria-label", t("bottle.ariaLabel", { name: designLabel }).trim());
     els.bottle.style.filter = DEFAULT_DROP_SHADOW;
   }
   if (els.designOptions) {
@@ -987,7 +1179,7 @@ function startCountdown(durationMs) {
       stopCountdown();
       if (state.listening) {
         state.listening = false;
-        setStatus("Время вышло — попробуй ещё раз");
+        setStatusKey("status.timeout");
       }
     } else if (els.shakeCountdown) {
       els.shakeCountdown.textContent = String(seconds);
@@ -1083,7 +1275,7 @@ async function snapshotHistory() {try {
   }
 }
 async function waitForPartner(deadline) {
-  setStatus("Ищу партнёра рядом…");
+  setStatusKey("status.searching");
   while (Date.now() < deadline) {
     try {
       const data = await requestJSON("/api/history");
@@ -1094,7 +1286,7 @@ async function waitForPartner(deadline) {
           renderPartner(last);
           await loadProfile();
           await loadHistory();
-          setStatus("Готов к чок 🥂");
+          setStatusKey("status.ready");
           return true;
         }
       }
@@ -1110,7 +1302,7 @@ async function handleShake() {
   state.listening = false;
   stopCountdown();
   animateBottle();
-  setStatus("Чокаемся…");
+  setStatusKey("status.clinking");
 
   await snapshotHistory();
 try {
@@ -1119,7 +1311,7 @@ try {
       renderPartner(result.other);
       await loadProfile();
       await loadHistory();
-      setStatus("Готов к чок 🥂");
+      setStatusKey("status.ready");
       return;
     }
     if (result?.partner) {
@@ -1132,22 +1324,22 @@ try {
        await loadProfile();
         await loadHistory();
       
-            setStatus("Готов к чок 🥂");
+            setStatusKey("status.ready");
       return;
     }
     if (result?.status === "already_today") {
-      setStatus("С этой парой сегодня уже чокались");
+      setStatusKey("status.alreadyToday");
       return;
     }
     if (result?.status === "need_profile") {
-      setStatus("Заполни анкету, чтобы чокнуться");
+      setStatusKey("status.noPartners");
       showEdit(true);
       return;
     }
     const partnerJoined = await waitForPartner(Date.now() + 12000);
     if (!partnerJoined) {
       setPartner("");
-      setStatus("Никого рядом. Попробуй ещё раз");
+      setStatusKey("status.sendError");
     }
   } catch (error) {
     console.error("handleShake", error);
@@ -1158,18 +1350,18 @@ try {
 async function startListening() {
   if (state.listening) return;
   if (!state.profile) {
-    setStatus("Сначала заполни анкету в мини-аппе");
+    setStatusKey("status.needProfileBeforeShake");
     showEdit(true);
     return;
   }
   const granted = await ensureMotionPermission();
   if (!granted) {
-    setStatus("Разреши доступ к датчикам движения");
+    setStatusKey("status.needMotionPermission");
     return;
   }
   state.listening = true;
   startCountdown(12000);
-  setStatus("Встряхни телефон!");
+  setStatusKey("status.shakeNow");
 }
 
 function stopListening() {
@@ -1182,6 +1374,8 @@ async function loadProfile() {
     const data = await requestJSON("/api/profile/me");
     const profile = data?.profile || null;
     state.profile = profile;
+    const profileLanguage = profile?.language || DEFAULT_LANGUAGE;
+    await ensureLanguage(profileLanguage);
     applyContactAutofill(profile);
     if (els.editBtn) {
       els.editBtn.dataset.required = profile ? "false" : "true";
@@ -1199,7 +1393,7 @@ async function loadProfile() {
       setPartner("");
             state.customMoodValue = "";
       setMoodIndex(0);
-      setStatus("Заполни анкету в мини-аппе, чтобы начать чокаться");
+      setStatusKey("status.fillProfileFirst");
       showEdit(true);
       if (els.nameInput && document.activeElement !== els.nameInput) {
         els.nameInput.focus({ preventScroll: false });
@@ -1244,17 +1438,20 @@ async function loadProfile() {
       }
       showEdit(true);
     }
+    await ensureLanguage(state.language || DEFAULT_LANGUAGE);
     applyContactAutofill(null);
-    setStatus("Не удалось загрузить анкету");
+    setStatusKey("status.profileLoadError");
   }
 }
 
 function renderPartner(partner) {
   if (!partner) {
+    state.partnerData = null;
     setPartner("");
     return;
   }
-    const name = partner.withName || partner.name || "Гость";
+  state.partnerData = partner;
+  const name = partner.withName || partner.name || t("profile.guestName");
   const usernameRaw = partner.withUsername || partner.username || partner.tgUsername || null;
   const username = formatUsername(usernameRaw);
   const contact = formatContactValue(
@@ -1264,7 +1461,7 @@ function renderPartner(partner) {
   const fragment = document.createDocumentFragment();
   const headline = document.createElement("span");
   headline.className = "partner-line__headline";
-  headline.append("Вы чокнулись с ");
+  headline.append(t("partner.headlinePrefix"), " ");
   const nameEl = document.createElement("span");
   nameEl.className = "partner-line__name";
   nameEl.textContent = name;
@@ -1293,11 +1490,12 @@ async function loadHistory() {
   try {
     const data = await requestJSON("/api/history");
     const history = data?.history || [];
+    state.historyCache = history;
     els.historyList.innerHTML = "";
     history.forEach(entry => {
       const li = document.createElement("li");
             li.classList.add("history-item");
-      const name = entry.withName || entry.name || "Гость";
+      const name = entry.withName || entry.name || t("profile.guestName");
       const username = formatUsername(entry.withUsername || entry.username || null);
       const contact = formatContactValue(entry.contact || entry.withContact || "");
       let whenText = "";
@@ -1306,7 +1504,8 @@ async function loadHistory() {
         const parsed = new Date(entry.at);
         if (!Number.isNaN(parsed.getTime())) {
           whenDate = parsed;
-          whenText = parsed.toLocaleString();
+          const locale = state.language === "en" ? "en-US" : "ru-RU";
+          whenText = parsed.toLocaleString(locale);
         }
       }
 
@@ -1351,6 +1550,7 @@ async function loadHistory() {
     updateGamification(history);
   } catch (error) {
     console.warn("loadHistory", error);
+    state.historyCache = [];
     updateGamification([]);
   }
 }
@@ -1362,11 +1562,13 @@ function showEdit(open) {
   els.editBlock.hidden = false;
     els.editBlock.dataset.state = shouldOpen ? "open" : "collapsed";
   if (els.saveProfileBtn) {
-        els.saveProfileBtn.textContent = required
-      ? "Сохранить анкету"
-      : shouldOpen
-        ? "Сохранить"
-        : "Обновить настроение";
+       if (required) {
+      els.saveProfileBtn.textContent = t("profile.actions.saveFull");
+    } else if (shouldOpen) {
+      els.saveProfileBtn.textContent = t("profile.actions.save");
+    } else {
+      els.saveProfileBtn.textContent = t("profile.actions.updateMood");
+    }
   }
   if (els.cancelEditBtn) {
         if (required) {
@@ -1413,33 +1615,33 @@ async function saveProfile() {
     design: state.selectedDesign,
   };
 
-  if (!payload.name) {
-    setStatus("Имя обязательно");
+   if (!payload.name) {
+    setStatusKey("status.nameRequired");
     return;
   }
   if (!payload.age || payload.age < 21) {
-    setStatus("Минимальный возраст — 21");
+    setStatusKey("status.ageRequired");
     return;
   }
     if (!payload.mood) {
-    setStatus("Добавь настроение ✨");
+    setStatusKey("status.moodRequired");
     return;
   }
     if (!contactValue) {
-    setStatus("Добавь контакт, чтобы мы передали его собеседнику");
+    setStatusKey("status.contactRequired");
     return;
   }
 
   try {
     const result = await saveProfilePayload(payload);
     if (result?.ok || result?.profile) {
-      setStatus("Анкета обновлена ✅");
+      setStatusKey("status.profileSaved");
       showEdit(false);
             await loadProfile();
     }
   } catch (error) {
     console.error("saveProfile", error);
-    setStatus("Не удалось сохранить анкету");
+    setStatusKey("status.profileSaveError");
   }
   }
 
@@ -1447,12 +1649,12 @@ async function saveDesign() {
   try {
     const result = await saveDesignPayload(state.selectedDesign);
     if (result?.ok || result?.profile) {
-      setStatus("Дизайн сохранён ✨");
+      setStatusKey("status.designSaved");
       await loadProfile();
     }
   } catch (error) {
     console.warn("saveDesign", error);
-    setStatus("Не удалось сохранить дизайн");
+    ssetStatusKey("status.designSaveError");
   }
 }
 function openBot() {
@@ -1514,7 +1716,7 @@ function initButtons() {
   });
   els.friendsBtn?.addEventListener("click", async () => {
     await loadHistory();
-    setStatus("Показана история чоков 📜");
+    setStatusKey("status.historyShown");
   });
 
   els.saveDesignBtn?.addEventListener("click", (event) => {
@@ -1534,6 +1736,8 @@ function initMotionListener() {
 }
 
 async function init() {
+  await setLanguage(DEFAULT_LANGUAGE);
+  setStatusKey("status.initial");
   initUsername();
   initThemeSelect();
   initDesignCards();
@@ -1548,7 +1752,7 @@ async function init() {
   updateGamification([]);
   await loadHistory();
    if (state.profile) {
-    setStatus("Готов к чок 🥂");
+    setStatusKey("status.ready");
   }
 }
 init();

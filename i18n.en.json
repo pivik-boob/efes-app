@@ -1,0 +1,138 @@
+{
+  "app": {
+    "title": "Efes Cheers",
+    "brandTag": "Efes Club Card",
+    "heading": "Cheers!"
+  },
+  "buttons": {
+    "edit": "Profile",
+    "shake": "Cheers!",
+    "shakeHint": "1) Tap, 2) Shake your phone",
+    "saveDesign": "Save",
+    "cancel": "Cancel",
+    "friends": "My connections",
+    "openFromBot": "Open mini app from the bot"
+  },
+  "profile": {
+    "loading": "Loading...",
+    "sectionTitle": "Profile",
+    "guestName": "Guest",
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "What's your name?",
+      "age": "Age (21+)",
+      "agePlaceholder": "21",
+      "mood": "Mood",
+      "contact": "Contact",
+      "contactPlaceholder": "@nickname"
+    },
+    "actions": {
+      "saveFull": "Save profile",
+      "save": "Save",
+      "updateMood": "Update mood"
+    }
+  },
+  "status": {
+    "initial": "Tap \"Cheers!\" and shake your phone",
+    "timeout": "Time's up — try again",
+    "searching": "Looking for a partner nearby…",
+    "ready": "Ready to clink 🥂",
+    "clinking": "Clinking…",
+    "alreadyToday": "You've already clinked with this pair today",
+    "needProfile": "Fill out your profile to clink",
+    "noPartners": "No one nearby. Try again",
+    "sendError": "Couldn't send the clink, check your connection",
+    "needProfileBeforeShake": "Fill out your profile in the mini app first",
+    "needMotionPermission": "Allow access to motion sensors",
+    "shakeNow": "Shake your phone!",
+    "fillProfileFirst": "Fill out the profile in the mini app to start clinking",
+    "profileLoadError": "Couldn't load the profile",
+    "nameRequired": "Name is required",
+    "ageRequired": "Minimum age is 21",
+    "moodRequired": "Add a mood ✨",
+    "contactRequired": "Add a contact so we can share it with your partner",
+    "profileSaved": "Profile updated ✅",
+    "profileSaveError": "Couldn't save the profile",
+    "designSaved": "Design saved ✨",
+    "designSaveError": "Couldn't save the design",
+    "historyShown": "Clink history shown 📜"
+  },
+  "timer": {
+    "remaining": "Remaining",
+    "seconds": "sec"
+  },
+  "gamification": {
+    "levelInitial": "LVL 1",
+    "xpInitial": "0 / 100 XP",
+    "streakInitial": "🔥 0"
+  },
+  "level": {
+    "1": "Rookie",
+    "2": "Clink Master",
+    "3": "Foamy Hero",
+    "4": "Bar King",
+    "5": "Club Legend"
+  },
+  "quests": {
+    "title": "Quests",
+    "daily": "Clink today",
+    "friends": "Meet 5 friends",
+    "streak": "Keep a 3-day streak"
+  },
+  "design": {
+    "sectionTitle": "Bottle design",
+    "efes": "Efes",
+    "medved": "Polar Bear",
+    "ruzka": "Fresh Mug",
+    "miller": "Miller"
+  },
+  "theme": {
+    "sectionTitle": "Theme"
+  },
+  "history": {
+    "title": "History"
+  },
+  "mood": {
+    "prev": "Previous mood",
+    "next": "Next mood",
+    "current": "Now: {{value}}",
+    "joyful": {
+      "value": "Joyful",
+      "label": "Joyful",
+      "description": "Ready to clink with everyone around"
+    },
+    "chill": {
+      "value": "Chill",
+      "label": "Chill",
+      "description": "Relaxing and enjoying the vibe"
+    },
+    "energetic": {
+      "value": "Energetic",
+      "label": "Energetic",
+      "description": "Looking for drive and loud company"
+    },
+    "flirt": {
+      "value": "Flirty",
+      "label": "Flirty",
+      "description": "In the mood for sparks and smiles"
+    },
+    "dance": {
+      "value": "Dancing",
+      "label": "Dancing",
+      "description": "Ready to hit the dance floor right now"
+    },
+    "custom": {
+      "value": "",
+      "label": "Your mood",
+      "description": "Create your vibe and share it",
+      "placeholder": "Describe your mood"
+    }
+  },
+  "contact": {
+    "autofillNote": "We'll use your Telegram @username — your partner will see it after the clink.",
+    "manualNote": "Tell us how to reach you (e.g. phone or @username)."
+  },
+  "bottle": {
+    "ariaLabel": "Pixel bottle {{name}}"
+  }
+}

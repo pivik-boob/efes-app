@@ -15,16 +15,12 @@ model Profile {
   age              Int
   mood             String
   bottleDesign     BottleDesign
+  language         String    @default("ru") // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+    
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 }
 
-enum BottleDesign {
-  EFES
-  MILLER
-  KRUZHKA_SVEZHEGO
-  BELY_MEDVED
-}
 model Meeting {
   id      String   @id @default(cuid())
   userAId String
@@ -34,4 +30,11 @@ model Meeting {
   metAt   DateTime @default(now())
 
   @@unique([pairKey, dayKey])
+}
+
+enum BottleDesign {
+  EFES
+  MILLER
+  KRUZHKA_SVEZHEGO
+  BELY_MEDVED
 }

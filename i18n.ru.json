@@ -1,0 +1,138 @@
+{
+  "app": {
+    "title": "Efes Чок",
+    "brandTag": "Efes Club Card",
+    "heading": "Чок!"
+  },
+  "buttons": {
+    "edit": "Анкета",
+    "shake": "Чок!",
+    "shakeHint": "1) Нажми, 2) Тряси телефон",
+    "saveDesign": "Сохранить",
+    "cancel": "Отменить",
+    "friends": "Мои знакомства",
+    "openFromBot": "Открыть мини-апп из бота"
+  },
+  "profile": {
+    "loading": "Загрузка...",
+    "sectionTitle": "Анкета",
+    "guestName": "Гость",
+    "fields": {
+      "name": "Имя",
+      "namePlaceholder": "Как тебя зовут?",
+      "age": "Возраст (21+)",
+      "agePlaceholder": "21",
+      "mood": "Настроение",
+      "contact": "Контакт",
+      "contactPlaceholder": "@nickname"
+    },
+    "actions": {
+      "saveFull": "Сохранить анкету",
+      "save": "Сохранить",
+      "updateMood": "Обновить настроение"
+    }
+  },
+  "status": {
+    "initial": "Нажми «Чок!» и встряхни телефон",
+    "timeout": "Время вышло — попробуй ещё раз",
+    "searching": "Ищу партнёра рядом…",
+    "ready": "Готов к чок 🥂",
+    "clinking": "Чокаемся…",
+    "alreadyToday": "С этой парой сегодня уже чокались",
+    "needProfile": "Заполни анкету, чтобы чокнуться",
+    "noPartners": "Никого рядом. Попробуй ещё раз",
+    "sendError": "Не удалось отправить чок, проверь сеть",
+    "needProfileBeforeShake": "Сначала заполни анкету в мини-аппе",
+    "needMotionPermission": "Разреши доступ к датчикам движения",
+    "shakeNow": "Встряхни телефон!",
+    "fillProfileFirst": "Заполни анкету в мини-аппе, чтобы начать чокаться",
+    "profileLoadError": "Не удалось загрузить анкету",
+    "nameRequired": "Имя обязательно",
+    "ageRequired": "Минимальный возраст — 21",
+    "moodRequired": "Добавь настроение ✨",
+    "contactRequired": "Добавь контакт, чтобы мы передали его собеседнику",
+    "profileSaved": "Анкета обновлена ✅",
+    "profileSaveError": "Не удалось сохранить анкету",
+    "designSaved": "Дизайн сохранён ✨",
+    "designSaveError": "Не удалось сохранить дизайн",
+    "historyShown": "Показана история чоков 📜"
+  },
+  "timer": {
+    "remaining": "Осталось",
+    "seconds": "сек"
+  },
+  "gamification": {
+    "levelInitial": "LVL 1",
+    "xpInitial": "0 / 100 XP",
+    "streakInitial": "🔥 0"
+  },
+  "level": {
+    "1": "Новичок",
+    "2": "Чок-мастер",
+    "3": "Пенный герой",
+    "4": "Король бара",
+    "5": "Легенда клуба"
+  },
+  "quests": {
+    "title": "Задания",
+    "daily": "Чокнись сегодня",
+    "friends": "Познакомься с 5 друзьями",
+    "streak": "Держи серию 3 дня"
+  },
+  "design": {
+    "sectionTitle": "Дизайн бутылочки",
+    "efes": "Efes",
+    "medved": "Белый медведь",
+    "ruzka": "Ружка светлое",
+    "miller": "Miller"
+  },
+  "theme": {
+    "sectionTitle": "Тема"
+  },
+  "history": {
+    "title": "История"
+  },
+  "mood": {
+    "prev": "Предыдущее настроение",
+    "next": "Следующее настроение",
+    "current": "Сейчас: {{value}}",
+    "joyful": {
+      "value": "Весёлое",
+      "label": "Весёлое",
+      "description": "Готов(а) чокаться со всеми подряд"
+    },
+    "chill": {
+      "value": "Чилл",
+      "label": "Чилл",
+      "description": "Спокойно отдыхаю и ловлю вайб"
+    },
+    "energetic": {
+      "value": "Энергичное",
+      "label": "Энергичное",
+      "description": "В поиске драйва и шумных компаний"
+    },
+    "flirt": {
+      "value": "Флирт",
+      "label": "Флирт",
+      "description": "Настроение ловить искры и улыбки"
+    },
+    "dance": {
+      "value": "Танцевальное",
+      "label": "Танцевальное",
+      "description": "Готов(а) выйти на танцпол прямо сейчас"
+    },
+    "custom": {
+      "value": "",
+      "label": "Своё настроение",
+      "description": "Придумай свой вайб и поделись им",
+      "placeholder": "Опиши своё настроение"
+    }
+  },
+  "contact": {
+    "autofillNote": "Мы автоматически подставим твой Telegram @username.",
+    "manualNote": "Укажи, как с тобой связаться (например, телефон или @username)."
+  },
+  "bottle": {
+    "ariaLabel": "Пиксельная бутылочка {{name}}"
+  }
+}

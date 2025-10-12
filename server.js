@@ -95,10 +95,98 @@ function designEnumToKey(enumValue) {
 }
 
 
+const SUPPORTED_LANGUAGES = ['ru', 'en'];
+const DEFAULT_LANGUAGE = 'ru';
+
+const LANGUAGE_BUTTONS = [
+  { code: 'ru', label: 'Русский 🇷🇺' },
+  { code: 'en', label: 'English 🇬🇧' },
+];
+
+const BOT_TEXTS = {
+  ru: {
+    defaultName: 'друг',
+    defaultGuestName: 'Гость',
+    greetingLines: [
+      'Привет, {{name}}{{idSuffix}}😄',
+      '',
+      'Рад знакомству! Меня зовут Пивик 🙂',
+      'Я твой личный ассистент в мире Эфеса 🍻',
+      'Давай я расскажу тебе подробнее про нашу цифровую бутылочку Эфес 😉',
+      '',
+      'С бутылочкой ты можешь легко обмениваться контактами на любых мероприятиях от Эфеса 😙',
+      'Давай создадим твою персональную цифровую бутылочку Эфес!',
+    ],
+    miniAppIntro: 'Готов пройти анкету, выбрать настроение и чокнуться с другими гостями? Жми кнопку ниже!',
+    miniAppUnavailable: 'Мини-приложение сейчас недоступно.',
+    miniAppButton: 'Открыть мини-приложение Эфес',
+    languagePrompt: 'Выбери язык, чтобы продолжить:\nChoose your language to continue:',
+    languageSaved: 'Готово! Общаемся на русском 🇷🇺',
+    languageSavedShort: 'Русский выбран',
+    webAppDataReceived: 'Данные мини-приложения получены! Если хочешь начать сначала — просто открой мини-приложение ещё раз.',
+    openMiniAppHint: 'Открой мини-приложение по кнопке выше, чтобы продолжить.',
+    mapInfo: 'Скоро поделимся картой мероприятия. А пока загляни в мини-приложение!'
+  },
+  en: {
+    defaultName: 'friend',
+    defaultGuestName: 'Guest',
+    greetingLines: [
+      'Hi, {{name}}{{idSuffix}}😄',
+      '',
+      "Great to meet you! I'm Pivik 🙂",
+      "I'm your personal guide to the world of Efes 🍻",
+      'Let me tell you more about our digital Efes bottle 😉',
+      '',
+      'With the bottle you can exchange contacts at any Efes event 😙',
+      "Let's create your personal digital Efes bottle!",
+    ],
+    miniAppIntro: 'Ready to fill out the form, choose your mood, and clink with other guests? Tap the button below!',
+    miniAppUnavailable: 'The mini app is not available right now.',
+    miniAppButton: 'Open the Efes mini app',
+    languagePrompt: 'Choose your language to continue:\nВыбери язык, чтобы продолжить:',
+    languageSaved: 'Nice! We will chat in English 🇬🇧',
+    languageSavedShort: 'English selected',
+    webAppDataReceived: 'Mini app data received! If you want to start over, just open the mini app again.',
+    openMiniAppHint: 'Open the mini app using the button above to continue.',
+    mapInfo: 'We will share the event map soon. For now, check the mini app!'
+  },
+};
+
+function formatTemplate(template, params = {}) {
+  if (typeof template !== 'string') return '';
+  return template.replace(/{{\s*(\w+)\s*}}/g, (_match, key) => {
+    const value = params[key];
+    return value === undefined || value === null ? '' : String(value);
+  });
+}
+
+function normalizeLanguage(value, fallback = DEFAULT_LANGUAGE) {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  return SUPPORTED_LANGUAGES.includes(normalized) ? normalized : fallback;
+}
+
+function getBotTexts(language = DEFAULT_LANGUAGE) {
+  const lang = normalizeLanguage(language, DEFAULT_LANGUAGE);
+  return BOT_TEXTS[lang] || BOT_TEXTS[DEFAULT_LANGUAGE];
+}
+
+function buildLanguageSelectionKeyboard() {
+  return {
+    inline_keyboard: [
+      LANGUAGE_BUTTONS.map(button => ({
+        text: button.label,
+        callback_data: `lang:${button.code}`,
+      })),
+    ],
+  };
+}
+
 
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
+
 
 
 
@@ -120,6 +208,7 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
     'age',
     'mood',
     'design',
+    'language',
     'createdAt',
     'updatedAt',
   ]);
@@ -195,6 +284,7 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
         };
         merged.design = normalizeDesign(merged.design, existing?.design || 'efes');
         merged.tgUsername = merged.tgUsername ?? null;
+        merged.language = normalizeLanguage(merged.language, existing?.language || DEFAULT_LANGUAGE);
         merged.createdAt = existing?.createdAt || now;
         merged.updatedAt = now;
         const sanitized = Object.fromEntries(
@@ -216,6 +306,7 @@ function createFileStoreClient(reason = 'no DATABASE_URL') {
         };
         merged.design = normalizeDesign(merged.design, 'efes');
         merged.tgUsername = merged.tgUsername ?? null;
+        merged.language = normalizeLanguage(merged.language, DEFAULT_LANGUAGE);
         merged.createdAt = now;
         merged.updatedAt = now;
         const sanitized = Object.fromEntries(
@@ -310,6 +401,7 @@ function normalizePrismaProfile(record) {
     mood: record.mood,
     tgUsername: record.telegramUsername || null,
     design: designEnumToKey(record.bottleDesign),
+    language: normalizeLanguage(record.language, DEFAULT_LANGUAGE),
     createdAt: createdAt || null,
     updatedAt: updatedAt || null,
   };
@@ -321,6 +413,7 @@ function mapProfileDataForPrisma(data = {}, existingDesign = 'efes', forceDesign
   if (data.age !== undefined) mapped.age = data.age;
   if (data.mood !== undefined) mapped.mood = data.mood;
   if (data.tgUsername !== undefined) mapped.telegramUsername = data.tgUsername || null;
+  if (data.language !== undefined) mapped.language = normalizeLanguage(data.language, DEFAULT_LANGUAGE);
   if (data.design !== undefined) {
     mapped.bottleDesign = designKeyToEnum(data.design, existingDesign);
   } else if (forceDesign) {
@@ -498,6 +591,46 @@ function decorateProfile(profile) {
   return { ...profile, contact: deriveProfileContact(profile) };
 }
 
+function getProfileDefaultsForLanguage(language, tgUser = null) {
+  const lang = normalizeLanguage(language, DEFAULT_LANGUAGE);
+  const texts = getBotTexts(lang);
+  const fallbackTexts = getBotTexts(DEFAULT_LANGUAGE);
+  return {
+    name: texts.defaultGuestName || fallbackTexts.defaultGuestName || 'Гость',
+    age: 21,
+    mood: '',
+    tgUsername: tgUser?.username || null,
+    design: 'efes',
+  };
+}
+
+async function setUserLanguagePreference(userId, language, tgUser = null) {
+  if (!userId) return null;
+  const lang = normalizeLanguage(language, DEFAULT_LANGUAGE);
+  const defaults = getProfileDefaultsForLanguage(lang, tgUser);
+  const profile = await db.profile.upsert({
+    where: { userId: String(userId) },
+    create: {
+      userId: String(userId),
+      ...defaults,
+      language: lang,
+    },
+    update: { language: lang },
+  });
+  return profile;
+}
+
+async function getUserLanguage(userId) {
+  if (!userId) return DEFAULT_LANGUAGE;
+  try {
+    const profile = await db.profile.findUnique({ where: { userId: String(userId) } });
+    return normalizeLanguage(profile?.language, DEFAULT_LANGUAGE);
+  } catch (err) {
+    console.warn('getUserLanguage failed:', err?.message || err);
+    return DEFAULT_LANGUAGE;
+  }
+}
+
 async function upsertProfileFromWebApp(userId, body, tgUser) {
   const fields = pickProfileFields(body, tgUser);
   const profileData = {
@@ -583,41 +716,27 @@ if (process.env.REDIS_URL) {
 
 
 // ---------- Telegram bot helpers ----------
-function formatGreeting(message) {
+function formatGreeting(message, language = DEFAULT_LANGUAGE) {
+  const texts = getBotTexts(language);
+  const fallbackTexts = getBotTexts(DEFAULT_LANGUAGE);
   const firstName = message?.from?.first_name?.trim();
-  const displayName = firstName || 'друг';
-  const userId = message?.from?.id ? ` (${message.from.id})` : '';
-
-  return [
-    `Привет, ${displayName}${userId}😄`,
-    '',
-    'Рад знакомству! Меня зовут Пивик 🙂',
-    'Я твой личный ассистент в мире Эфеса 🍻',
-    'Давай я расскажу тебе подробнее про нашу цифровую бутылочку Эфес 😉',
-    '',
-    'С бутылочкой ты можешь легко обмениваться контактами на любых мероприятиях от Эфеса 😙',
-    'Давай создадим твою персональную цифровую бутылочку Эфес!'
-  ].join('\n');
+  const displayName = firstName || texts.defaultName || fallbackTexts.defaultName || '';
+  const idSuffix = message?.from?.id ? ` (${message.from.id})` : '';
+  const lines = Array.isArray(texts.greetingLines) && texts.greetingLines.length
+    ? texts.greetingLines
+    : fallbackTexts.greetingLines;
+  return lines.map(line => formatTemplate(line, { name: displayName, idSuffix })).join('\n');
 }
 
-function buildMiniAppButton() {
+function buildMiniAppButton(language = DEFAULT_LANGUAGE) {
   const miniAppUrl = buildMiniAppLink();
   if (!miniAppUrl) return null;
 
   return {
     inline_keyboard: [[{
-      text: 'Открыть мини-приложение Эфес',
+      text: getBotTexts(language).miniAppButton,
       web_app: { url: miniAppUrl },
     }]],
-  };
-}
-
-function buildStartMenuKeyboard() {
-  return {
-    keyboard: [[{ text: '/start' }]],
-    resize_keyboard: true,
-    is_persistent: true,
-    input_field_placeholder: 'Нажми /start, чтобы открыть меню',
   };
 }
 
@@ -646,30 +765,25 @@ async function callTelegram(method, payload) {
   }
 }
 
-async function sendGreetingAndMiniApp(message) {
-  const chatId = message?.chat?.id;
+async function sendGreetingAndMiniApp(message, language = DEFAULT_LANGUAGE) {
+  const chatId = message?.chat?.id || message?.from?.id;
   if (!chatId) return;
 
-  const greetingText = formatGreeting(message);
+  const lang = normalizeLanguage(language, DEFAULT_LANGUAGE);
+  const texts = getBotTexts(lang);
+  const greetingText = formatGreeting(message, lang);
 
   const greetingMessage = {
     chat_id: chatId,
     text: greetingText,
  };
 
-  const startMenu = buildStartMenuKeyboard();
-  if (startMenu) {
-    greetingMessage.reply_markup = startMenu;
-  }
-
   await callTelegram('sendMessage', greetingMessage);
 
-  const miniAppButton = buildMiniAppButton();
+  const miniAppButton = buildMiniAppButton(lang);
   const miniAppMessage = {
     chat_id: chatId,
-    text: miniAppButton
-      ? 'Готов пройти анкету, выбрать настроение и чокнуться с другими гостями? Жми кнопку ниже!'
-      : 'Мини-приложение сейчас недоступно.',
+    text: miniAppButton ? texts.miniAppIntro : texts.miniAppUnavailable,
   };
 
   if (miniAppButton) {
@@ -679,34 +793,60 @@ async function sendGreetingAndMiniApp(message) {
   await callTelegram('sendMessage', miniAppMessage);
 }
 
+async function sendLanguageSelection(chatId, language = DEFAULT_LANGUAGE) {
+  if (!chatId) return;
+  const lang = normalizeLanguage(language, DEFAULT_LANGUAGE);
+  const texts = getBotTexts(lang);
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: texts.languagePrompt,
+    reply_markup: buildLanguageSelectionKeyboard(),
+  });
+}
+
+async function sendMapInfo(message, language = DEFAULT_LANGUAGE) {
+  const chatId = message?.chat?.id || message?.from?.id;
+  if (!chatId) return;
+  const lang = normalizeLanguage(language, DEFAULT_LANGUAGE);
+  const texts = getBotTexts(lang);
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: texts.mapInfo,
+  });
+}
+
 async function handleTelegramUpdate(update) {
   if (!update) return;
 
   if (update.message) {
     const message = update.message;
+    const chatId = message.chat?.id;
+    const userId = message.from?.id ? String(message.from.id) : null;
+    const language = await getUserLanguage(userId);
     if (message.web_app_data) {
       await callTelegram('sendMessage', {
-        chat_id: message.chat.id,
-        text: 'Данные мини-приложения получены! Если хочешь начать сначала — просто открой мини-приложение ещё раз.',      });
-      return;
+        chat_id: chatId,
+        text: getBotTexts(language).webAppDataReceived,
+      });
     }
     const rawText = typeof message.text === 'string' ? message.text.trim() : '';
     const normalized = rawText.toLowerCase();
 
+
     if (rawText === '/start' || normalized === 'старт' || normalized === 'start') {
-      await sendGreetingAndMiniApp(message);
+      await sendLanguageSelection(chatId, language);
       return;
     }
 
     if (rawText === '/map' || normalized === 'карта' || normalized === 'map') {
-      await sendMapInfo(message);
+      await sendMapInfo(message, language);
       return;
     }
 
     if (normalized) {
       await callTelegram('sendMessage', {
-        chat_id: message.chat.id,
-        text: 'Открой мини-приложение по кнопке выше, чтобы продолжить.',
+        chat_id: chatId,
+        text: getBotTexts(language).openMiniAppHint,
       });
       return;
     }
@@ -714,9 +854,46 @@ async function handleTelegramUpdate(update) {
 
   if (update.callback_query) {
     const cq = update.callback_query;
-    if (cq.data === 'start') {
-      await sendGreetingAndMiniApp({ chat: cq.message?.chat, from: cq.from });
+    const data = typeof cq.data === 'string' ? cq.data : '';
+    const chatId = cq.message?.chat?.id || cq.from?.id || null;
+
+    if (data.startsWith('lang:')) {
+      const selected = data.split(':')[1];
+      const lang = normalizeLanguage(selected, DEFAULT_LANGUAGE);
+      await setUserLanguagePreference(cq.from?.id ? String(cq.from.id) : null, lang, cq.from);
+      if (cq.message?.message_id && chatId) {
+        await callTelegram('editMessageReplyMarkup', {
+          chat_id: chatId,
+          message_id: cq.message.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+      }
+      const texts = getBotTexts(lang);
+      if (cq.id) {
+        await callTelegram('answerCallbackQuery', {
+          callback_query_id: cq.id,
+          text: texts.languageSavedShort || texts.languageSaved,
+          show_alert: false,
+        });
+      }
+      if (chatId) {
+        await callTelegram('sendMessage', { chat_id: chatId, text: texts.languageSaved });
+        await sendGreetingAndMiniApp({ chat: { id: chatId }, from: cq.from }, lang);
+      }
+      return;
     }
+
+    if (data === 'start') {
+      const lang = await getUserLanguage(cq.from?.id ? String(cq.from.id) : null);
+      if (chatId) {
+        await sendLanguageSelection(chatId, lang);
+      }
+      if (cq.id) {
+        await callTelegram('answerCallbackQuery', { callback_query_id: cq.id });
+      }
+      return;
+    }
+
     if (cq.id) {
       await callTelegram('answerCallbackQuery', { callback_query_id: cq.id });
     }
@@ -968,6 +1145,7 @@ app.post('/api/profile/design', authMiddleware, async (req, res) => {
       age: existing?.age ?? 21,
       mood: existing?.mood || '',
       tgUsername: existing?.tgUsername ?? req.tgUser?.username ?? null,
+      language: existing?.language || DEFAULT_LANGUAGE,
     };
     const p = await db.profile.upsert({
       where: { userId },

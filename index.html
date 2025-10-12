@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Efes Чок</title>
+  <title data-i18n="app.title">Efes Чок</title>
 
   <!-- Telegram Mini App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -18,32 +18,32 @@
     <section class="card">
       <header class="card-header">
         <div class="title-group">
-          <p class="brand-tag">Efes Club Card</p>
-          <h1>Чок!</h1>
+          <p class="brand-tag" data-i18n="app.brandTag">Efes Club Card</p>
+          <h1 data-i18n="app.heading">Чок!</h1>
         </div>
-        <button class="chip" id="editBtn" type="button">Анкета</button>
+        <button class="chip" id="editBtn" type="button" data-i18n="buttons.edit">Анкета</button>
       </header>
 
       <section class="card-status">
-        <h2 id="username">Загрузка...</h2>
-        <p id="status" class="status-line">Нажми «Чок!» и встряхни телефон</p>
+        <h2 id="username" data-i18n="profile.loading">Загрузка...</h2>
+        <p id="status" class="status-line" data-i18n="status.initial">Нажми «Чок!» и встряхни телефон</p>
         <p id="partner" class="partner-line"></p>
         <div id="shakeTimer" class="shake-timer" hidden>
-          <span class="timer-label">Осталось</span>
+          <span class="timer-label" data-i18n="timer.remaining">Осталось</span>
           <span id="shakeCountdown" class="timer-value">10</span>
-          <span class="timer-label">сек</span>
+          <span class="timer-label" data-i18n="timer.seconds">сек</span>
         </div>
       </section>
 
       <section class="card-gamify" aria-live="polite">
         <div class="level-chip">
-          <span id="levelLabel" class="level-rank">LVL 1</span>
-          <span id="titleLabel" class="level-title">Новичок</span>
+          <span id="levelLabel" class="level-rank" data-i18n="gamification.levelInitial">LVL 1</span>
+          <span id="titleLabel" class="level-title" data-i18n="level.1">Новичок</span>
         </div>
         <div class="xp-track">
           <div class="xp-head">
-            <span id="xpLabel">0 / 100 XP</span>
-            <span id="streakLabel" class="streak">🔥 0</span>
+            <span id="xpLabel" data-i18n="gamification.xpInitial">0 / 100 XP</span>
+            <span id="streakLabel" class="streak" data-i18n="gamification.streakInitial">🔥 0</span>
           </div>
           <div class="xp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div id="xpFill" class="xp-fill"></div>
@@ -51,7 +51,7 @@
         </div>
                 <details id="questDropdown" class="quest-dropdown">
           <summary class="quest-summary">
-            <span class="quest-summary__title">Задания</span>
+            <span class="quest-summary__title" data-i18n="quests.title">Задания</span>
             <span class="quest-summary__chevron" aria-hidden="true"></span>
           </summary>
           <div class="quest-body">
@@ -72,92 +72,92 @@
           <div id="cap" class="cap" aria-hidden="true"></div>
           <div id="foam" class="foam" aria-hidden="true"></div>
         </div>
-        <button class="btn primary" id="shakeBtn" title="1) Нажми, 2) Тряси телефон">Чок!</button>
-      </section>
 
+
+        <button class="btn primary" id="shakeBtn" data-i18n="buttons.shake" data-i18n-title="buttons.shakeHint" title="1) Нажми, 2) Тряси телефон">Чок!</button>
       <section id="designSection" class="card-section">
         <div class="section-head">
-          <h3>Дизайн бутылочки</h3>
-          <button class="chip" id="saveDesignBtn" type="button">Сохранить</button>
+          <h3 data-i18n="design.sectionTitle">Дизайн бутылочки</h3>
+          <button class="chip" id="saveDesignBtn" type="button" data-i18n="buttons.saveDesign">Сохранить</button>
         </div>
         <div id="designOptions" class="design-grid">
           <button class="design-card design-card--efes" data-design="efes" type="button">
             <span class="design-icon bottle-visual visual--bottle bottle--efes" aria-hidden="true"></span>
-            <span class="design-label">Efes</span>
+            <span class="design-label" data-i18n="design.efes">Efes</span>
           </button>
                     <button class="design-card design-card--medved" data-design="medved" type="button">
             <span class="design-icon bottle-visual visual--bottle bottle--medved" aria-hidden="true"></span>
-            <span class="design-label">Белый медведь</span>
+            <span class="design-label" data-i18n="design.medved">Белый медведь</span>
           </button>
           <button class="design-card design-card--ruzka" data-design="ruzka" type="button">
             <span class="design-icon bottle-visual visual--bottle bottle--ruzka" aria-hidden="true"></span>
-            <span class="design-label">Ружка светлое</span>
+            <span class="design-label" data-i18n="design.ruzka">Кружка свежего</span>
           </button>
           <button class="design-card design-card--miller" data-design="miller" type="button">
             <span class="design-icon bottle-visual visual--bottle bottle--miller" aria-hidden="true"></span>
-            <span class="design-label">Miller</span>
+            <span class="design-label" data-i18n="design.miller">Miller</span>
           </button>
         </div>
       </section>
 
       <section id="editBlock" class="card-section profile-block" data-state="collapsed">
-        <h3>Анкета</h3>
+        <h3 data-i18n="profile.sectionTitle">Анкета</h3>
         <label class="field field--name">
-          <span>Имя</span>
-          <input id="nameInput" type="text" placeholder="Как тебя зовут?" required>
+          <span data-i18n="profile.fields.name">Имя</span>
+          <input id="nameInput" type="text" placeholder="Как тебя зовут?" data-i18n-placeholder="profile.fields.namePlaceholder" required>
         </label>
         <label class="field field--age">
-          <span>Возраст (21+)</span>
-          <input id="ageInput" type="number" min="21" max="120" placeholder="21" required>
+          <span data-i18n="profile.fields.age">Возраст (21+)</span>
+          <input id="ageInput" type="number" min="21" max="120" placeholder="21" data-i18n-placeholder="profile.fields.agePlaceholder" required>
         </label>
         <label class="field field--mood">
-          <span>Настроение</span>
+          <span data-i18n="profile.fields.mood">Настроение</span>
                  <div class="mood-carousel" id="moodCarousel" data-index="0">
-            <button class="mood-nav mood-nav--prev" id="moodPrev" type="button" aria-label="Предыдущее настроение"></button>
+            <button class="mood-nav mood-nav--prev" id="moodPrev" type="button" data-i18n-aria-label="mood.prev" aria-label="Предыдущее настроение"></button>
             <div class="mood-window" id="moodWindow">
               <ul class="mood-track" id="moodTrack" role="listbox" aria-live="polite"></ul>
             </div>
-            <button class="mood-nav mood-nav--next" id="moodNext" type="button" aria-label="Следующее настроение"></button>
+            <button class="mood-nav mood-nav--next" id="moodNext" type="button" data-i18n-aria-label="mood.next" aria-label="Следующее настроение"></button>
           </div>
           <p id="moodActiveText" class="mood-active-text" aria-live="polite"></p>
           <input id="moodInput" type="hidden" required>
-          <input id="moodCustomInput" class="mood-custom-input" type="text" placeholder="Опиши своё настроение" autocomplete="off">
+          <input id="moodCustomInput" class="mood-custom-input" type="text" placeholder="Опиши своё настроение" data-i18n-placeholder="mood.custom.placeholder" autocomplete="off">
         </label>
                  <label class="field field--contact" id="contactField">
-          <span>Контакт</span>
-                   <input id="contactInput" type="text" placeholder="@nickname" autocomplete="off">
-          <p id="contactNote" class="field-note">Мы автоматически подставим твой Telegram @username.</p>
+          <span data-i18n="profile.fields.contact">Контакт</span>
+                   <input id="contactInput" type="text" placeholder="@nickname" data-i18n-placeholder="profile.fields.contactPlaceholder" autocomplete="off">
+          <p id="contactNote" class="field-note" data-i18n="contact.autofillNote">Мы автоматически подставим твой Telegram @username.</p>
         </label>
         <div class="edit-actions">
-          <button class="btn primary" id="saveProfileBtn" type="button">Сохранить</button>
-          <button class="btn ghost" id="cancelEditBtn" type="button">Отменить</button>
+          <button class="btn primary" id="saveProfileBtn" type="button" data-i18n="profile.actions.save">Сохранить</button>
+          <button class="btn ghost" id="cancelEditBtn" type="button" data-i18n="buttons.cancel">Отменить</button>
         </div>
       </section>
 
       <section class="card-section compact">
         <div class="section-head">
-          <h3>Тема</h3>
+          <h3 data-i18n="theme.sectionTitle">Тема</h3>
           <select id="themeSel">
-            <option value="efes">EFES</option>
-            <option value="miller">Miller</option>
-            <option value="ruzka">Кружка свежего</option>
-                        <option value="medved">Белый медведь</option>
+            <option value="efes" data-i18n="design.efes">EFES</option>
+            <option value="miller" data-i18n="design.miller">Miller</option>
+            <option value="ruzka" data-i18n="design.ruzka">Кружка свежего</option>
+            <option value="medved" data-i18n="design.medved">Белый медведь</option>
           </select>
         </div>
       </section>
 
       <section id="historyBox" class="card-section">
-        <h3>История</h3>
+        <h3 data-i18n="history.title">История</h3>
         <ul id="historyList"></ul>
       </section>
 
       <footer class="card-footer">
         <div class="action-row">
-          <button class="btn ghost" id="friendsBtn" type="button">Мои знакомства</button>
+          <button class="btn ghost" id="friendsBtn" type="button" data-i18n="buttons.friends">Мои знакомства</button>
         </div>
               </footer>
     </section>
-   <button id="openFromBotBtn" class="bot-entry" type="button" style="display:none;">
+   <button id="openFromBotBtn" class="bot-entry" type="button" style="display:none;" data-i18n="buttons.openFromBot">
       Открыть мини-апп из бота
     </button>
      </main>
