@@ -1308,6 +1308,7 @@ async function handleShake() {
 try {
     const result = await requestJSON("/api/shake", { method: "POST" });
     if (result?.status === "matched" && result.other) {
+      tg.HapticFeedback.notificationOccurred('success');
       renderPartner(result.other);
       await loadProfile();
       await loadHistory();
@@ -1315,16 +1316,11 @@ try {
       return;
     }
     if (result?.partner) {
+      tg.HapticFeedback.notificationOccurred('success');
       renderPartner(result.partner);
-  
-  
-  
-  
-  
-       await loadProfile();
-        await loadHistory();
-      
-            setStatusKey("status.ready");
+      await loadProfile();
+      await loadHistory();
+      setStatusKey("status.ready");
       return;
     }
     if (result?.status === "already_today") {
